@@ -1,9 +1,14 @@
-package com.example.ivan
+package com.example.ivan.main
 
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
 import androidx.lifecycle.lifecycleScope
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import com.example.ivan.chat.ChatScreen
 import com.yandex.authsdk.YandexAuthLoginOptions
 import com.yandex.authsdk.YandexAuthOptions
 import com.yandex.authsdk.YandexAuthResult
@@ -18,7 +23,6 @@ import io.ktor.client.request.setBody
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
 import io.ktor.client.plugins.websocket.*
-import io.ktor.websocket.*
 import kotlinx.serialization.json.Json
 
 class MainActivity : ComponentActivity() {
@@ -28,8 +32,26 @@ class MainActivity : ComponentActivity() {
         val launcher = registerForActivityResult(sdk.contract) { result -> handleResult(result) }
         val loginOptions = YandexAuthLoginOptions()
         launcher.launch(loginOptions)
-    }
+        setContent {
+            val navController = rememberNavController()
+            NavHost(
+                navController = navController,
+                startDestination = "main"
+            ) {
+                composable("main") {
+                    MainScreen(
+                        onNavigateToChat = {
+                            navController.navigate("chat")
+                        }
+                    )
+                }
+                composable("chat") {
+                    ChatScreen()
+                }
+            }
 
+        }
+    }
     private fun handleResult(result: YandexAuthResult) {
         when (result) {
             is YandexAuthResult.Success -> onSuccessAuth(result.token)
@@ -90,6 +112,5 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
-
 }
 
