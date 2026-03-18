@@ -1,4 +1,4 @@
-package com.example.ivan
+package com.example.ivan.main
 
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
