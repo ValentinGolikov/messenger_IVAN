@@ -1,0 +1,5 @@
+.env
+.claude/
+.idea/
+dist/
+node_modules/

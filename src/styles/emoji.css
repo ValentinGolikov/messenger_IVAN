@@ -1,0 +1,30 @@
+.emoji-picker {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+  padding: 10px;
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 2px;
+  z-index: 100;
+  width: 320px;
+}
+
+.emoji-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s;
+}
+
+.emoji-btn:hover {
+  background: var(--hover);
+}

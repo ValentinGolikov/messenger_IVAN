@@ -1,0 +1,64 @@
+.reply-preview {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--surface2);
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.reply-preview:hover .reply-content {
+  opacity: 0.85;
+}
+
+.reply-bar {
+  width: 3px;
+  border-radius: 2px;
+  background: var(--blue);
+  flex-shrink: 0;
+}
+
+.reply-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.reply-sender {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--blue);
+}
+
+.reply-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reply-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.6;
+  margin-top: 2px;
+}
+
+.reply-close {
+  font-size: 14px;
+  color: var(--text-muted);
+  padding: 0 4px;
+  align-self: center;
+  flex-shrink: 0;
+  border-radius: 4px;
+}
+
+.reply-close:hover {
+  background: var(--hover);
+  color: var(--text);
+}

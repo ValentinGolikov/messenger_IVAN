@@ -1,0 +1,77 @@
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+
+.login-card {
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 48px 40px;
+  width: 100%;
+  max-width: 360px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  border: 1px solid var(--border);
+}
+
+.login-logo {
+  margin-bottom: 4px;
+}
+
+.login-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.login-subtitle {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.yandex-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 20px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text);
+  transition: background 0.15s, border-color 0.15s;
+  justify-content: center;
+}
+
+.yandex-btn:hover {
+  border-color: #FC3F1D;
+  background: var(--hover);
+}
+
+.login-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.5;
+}
+
+.dev-btn {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  padding: 4px;
+}
+
+.dev-btn:hover {
+  color: var(--text);
+}
