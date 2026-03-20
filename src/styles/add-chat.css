@@ -6,6 +6,7 @@
   align-items: center;
   justify-content: center;
   z-index: 300;
+  animation: fade-in 0.18s ease both;
 }
 
 .add-modal {
@@ -15,6 +16,7 @@
   max-width: 400px;
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.25);
   overflow: hidden;
+  animation: scale-in 0.22s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
 .add-header {

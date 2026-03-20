@@ -3,17 +3,21 @@ import EmojiPicker from './EmojiPicker'
 import ContextMenu from './ContextMenu'
 import ReplyPreview from './ReplyPreview'
 import ForwardModal from './ForwardModal'
+import ProfileModal from './ProfileModal'
 import '../styles/chat.css'
 
-export default function ChatArea({ chat, messages, onSend, onClearHistory, chats }) {
+export default function ChatArea({ chat, messages, onSend, onClearHistory, chats, appearance, getAlias, setAlias, onUpdateContactAvatar }) {
   const [input, setInput]               = useState('')
   const [showEmoji, setShowEmoji]       = useState(false)
   const [showMenu, setShowMenu]         = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(null)
   const [ctxMenu, setCtxMenu]           = useState(null)
-  const [replyTo, setReplyTo]           = useState(null) // { text, from, file }
+  const [replyTo, setReplyTo]           = useState(null)
   const [showForward, setShowForward]   = useState(false)
+  const [showContactProfile, setShowContactProfile] = useState(false)
+  const [showScrollBtn, setShowScrollBtn] = useState(false)
   const messagesEndRef = useRef(null)
+  const messagesRef    = useRef(null)
   const fileInputRef   = useRef(null)
   const menuRef        = useRef(null)
 
@@ -29,6 +33,17 @@ export default function ChatArea({ chat, messages, onSend, onClearHistory, chats
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
 
+  function handleScroll() {
+    const el = messagesRef.current
+    if (!el) return
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    setShowScrollBtn(distFromBottom > 150)
+  }
+
+  function scrollToBottom() {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
   if (!chat) {
     return (
       <div className="chat-area empty">
@@ -40,10 +55,12 @@ export default function ChatArea({ chat, messages, onSend, onClearHistory, chats
     )
   }
 
+  const chatName = (getAlias && getAlias(chat.id)) || chat.name
+
   function handleSend(e) {
     e?.preventDefault()
     if (!input.trim()) return
-    onSend(input.trim(), null)
+    onSend(input.trim(), null, undefined, replyTo)
     setInput('')
     setReplyTo(null)
   }
@@ -106,23 +123,99 @@ export default function ChatArea({ chat, messages, onSend, onClearHistory, chats
     setReplyTo(null)
   }
 
+  // Date separator helpers
+  function getDayLabel(timeStr) {
+    if (/^\d{2}:\d{2}$/.test(timeStr)) return 'Сегодня'
+    if (timeStr === 'Вчера') return 'Вчера'
+    return timeStr
+  }
+
+  // Build messages with date separators
+  const messageElements = []
+  let lastDayLabel = null
+  messages.forEach(msg => {
+    const dayLabel = getDayLabel(msg.time)
+    if (dayLabel !== lastDayLabel) {
+      lastDayLabel = dayLabel
+      messageElements.push(
+        <div key={`sep-${msg.id}`} className="date-separator">{dayLabel}</div>
+      )
+    }
+    messageElements.push(
+      <div key={msg.id} className={`message ${msg.from === 'me' ? 'me' : 'them'}`}>
+        <div
+          className="message-bubble"
+          onContextMenu={e => handleMsgContextMenu(e, msg)}
+        >
+          {msg.replyTo && (
+            <div className="msg-reply-quote">
+              <div className="msg-reply-bar" />
+              <div className="msg-reply-body">
+                <span className="msg-reply-sender">
+                  {msg.replyTo.from === 'me' ? 'Вы' : chatName}
+                </span>
+                <span className="msg-reply-text">
+                  {msg.replyTo.file ? `📎 ${msg.replyTo.file.name}` : msg.replyTo.text}
+                </span>
+              </div>
+            </div>
+          )}
+          {msg.file ? (
+            <div className="file-attachment">
+              <FileIcon />
+              <div className="file-info">
+                <span className="file-name">{msg.file.name}</span>
+                <span className="file-size">{msg.file.size}</span>
+              </div>
+              <button className="file-download" title="Скачать">↓</button>
+            </div>
+          ) : (
+            <p style={{ whiteSpace: 'pre-wrap' }}>{msg.text}</p>
+          )}
+          <div className="message-meta">
+            <span className="message-time">{msg.time}</span>
+            {msg.from === 'me' && <MessageStatus status={msg.status} />}
+            {chat.e2e && <span className="msg-lock"><LockTinyIcon /></span>}
+          </div>
+        </div>
+      </div>
+    )
+  })
+
+  // Background inline style for messages area
+  const messagesStyle = {}
+  if (appearance?.chatBgImage) {
+    messagesStyle.backgroundImage = `url(${appearance.chatBgImage})`
+    messagesStyle.backgroundSize = 'cover'
+    messagesStyle.backgroundPosition = 'center'
+  } else if (appearance?.chatBg) {
+    messagesStyle.backgroundColor = appearance.chatBg
+  }
+
   return (
     <div className="chat-area" onContextMenu={e => e.preventDefault()}>
 
       {/* Header */}
       <div className="chat-header">
-        <div className="chat-header-avatar">{chat.avatar}</div>
-        <div className="chat-header-info">
-          <div className="chat-header-name-row">
-            <span className="chat-header-name">{chat.name}</span>
+        <button className="chat-header-identity" onClick={() => setShowContactProfile(true)}>
+          <div className="chat-header-avatar">
+            {chat.customAvatar
+              ? <img src={chat.customAvatar} alt={chat.name} />
+              : chat.avatar
+            }
+          </div>
+          <div className="chat-header-info">
+            <div className="chat-header-name-row">
+              <span className="chat-header-name">{chatName}</span>
             {chat.e2e && (
               <span className="e2e-badge"><LockIcon /> E2E</span>
             )}
           </div>
-          <span className="chat-header-status">
-            {chat.online ? '🟢 в сети' : '⚫ не в сети'}
-          </span>
-        </div>
+            <span className="chat-header-status">
+              {chat.online ? '🟢 в сети' : '⚫ не в сети'}
+            </span>
+          </div>
+        </button>
 
         <div className="chat-header-menu" ref={menuRef}>
           <button className="icon-btn" onClick={() => setShowMenu(v => !v)}>
@@ -150,38 +243,25 @@ export default function ChatArea({ chat, messages, onSend, onClearHistory, chats
       )}
 
       {/* Messages */}
-      <div className="messages">
+      <div
+        className="messages"
+        ref={messagesRef}
+        onScroll={handleScroll}
+        style={messagesStyle}
+      >
         {messages.length === 0 && (
           <p className="no-messages">Нет сообщений. Начните общение!</p>
         )}
-        {messages.map(msg => (
-          <div key={msg.id} className={`message ${msg.from === 'me' ? 'me' : 'them'}`}>
-            <div
-              className="message-bubble"
-              onContextMenu={e => handleMsgContextMenu(e, msg)}
-            >
-              {msg.file ? (
-                <div className="file-attachment">
-                  <FileIcon />
-                  <div className="file-info">
-                    <span className="file-name">{msg.file.name}</span>
-                    <span className="file-size">{msg.file.size}</span>
-                  </div>
-                  <button className="file-download" title="Скачать">↓</button>
-                </div>
-              ) : (
-                <p style={{ whiteSpace: 'pre-wrap' }}>{msg.text}</p>
-              )}
-              <div className="message-meta">
-                <span className="message-time">{msg.time}</span>
-                {msg.from === 'me' && <MessageStatus status={msg.status} />}
-                {chat.e2e && <span className="msg-lock"><LockTinyIcon /></span>}
-              </div>
-            </div>
-          </div>
-        ))}
+        {messageElements}
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Scroll-to-bottom button */}
+      {showScrollBtn && (
+        <button className="scroll-to-bottom-btn" onClick={scrollToBottom} title="Вниз">
+          ↓
+        </button>
+      )}
 
       {/* Input area */}
       <div className="message-input-area">
@@ -227,6 +307,10 @@ export default function ChatArea({ chat, messages, onSend, onClearHistory, chats
             onKeyDown={handleKeyDown}
           />
 
+          {input.length > 0 && (
+            <span className="char-count">{input.length}</span>
+          )}
+
           <button type="submit" className="send-btn" disabled={!input.trim()}>
             <SendIcon />
           </button>
@@ -257,6 +341,18 @@ export default function ChatArea({ chat, messages, onSend, onClearHistory, chats
           currentChatId={chat.id}
           onForward={handleForward}
           onClose={() => setShowForward(false)}
+        />
+      )}
+
+      {/* Contact profile */}
+      {showContactProfile && (
+        <ProfileModal
+          user={{ ...chat, avatar: chat.customAvatar || null }}
+          onClose={() => setShowContactProfile(false)}
+          alias={getAlias ? getAlias(chat.id) : ''}
+          onSetAlias={name => setAlias && setAlias(chat.id, name)}
+          canEditAvatar={!!onUpdateContactAvatar}
+          onAvatarChange={dataUrl => onUpdateContactAvatar?.(chat.id, dataUrl)}
         />
       )}
 

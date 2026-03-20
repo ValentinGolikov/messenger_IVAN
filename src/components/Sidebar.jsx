@@ -7,6 +7,7 @@ export default function Sidebar({
   chats, activeChatId, onSelectChat,
   user, onLogout, theme, onToggleTheme,
   onShowSettings, onAddChat,
+  getAlias, setAlias, displayName, saveUser,
 }) {
   const [search, setSearch]         = useState('')
   const [showProfile, setShowProfile] = useState(false)
@@ -28,10 +29,14 @@ export default function Sidebar({
     return [...pinnedList, ...unpinnedList]
   })()
 
-  const filtered = orderedChats.filter(c =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.username.toLowerCase().includes(search.toLowerCase())
-  )
+  const filtered = orderedChats.filter(c => {
+    const alias = getAlias ? getAlias(c.id) : ''
+    return (
+      c.name.toLowerCase().includes(search.toLowerCase()) ||
+      c.username.toLowerCase().includes(search.toLowerCase()) ||
+      alias.toLowerCase().includes(search.toLowerCase())
+    )
+  })
 
   // ── Context menu ──
   function handleContextMenu(e, chatId) {
@@ -119,12 +124,12 @@ export default function Sidebar({
           <button className="sidebar-user" onClick={() => setShowProfile(true)}>
             <div className="user-avatar">
               {user?.avatar
-                ? <img src={user.avatar} alt={user.name} />
-                : <span>{user?.name?.[0] ?? '?'}</span>
+                ? <img src={user.avatar} alt={user?.displayName || user?.name} />
+                : <span>{(user?.displayName || user?.name)?.[0] ?? '?'}</span>
               }
               <span className="avatar-online-dot" />
             </div>
-            <span className="user-name">{user?.name ?? 'Пользователь'}</span>
+            <span className="user-name">{displayName ?? 'Пользователь'}</span>
           </button>
 
           <div className="sidebar-actions">
@@ -177,14 +182,19 @@ export default function Sidebar({
                   <span className="drag-handle" title="Перетащите для сортировки">⠿</span>
                 )}
                 <div className="chat-avatar-wrap">
-                  <div className="chat-avatar">{chat.avatar}</div>
+                  <div className="chat-avatar">
+                    {chat.customAvatar
+                      ? <img src={chat.customAvatar} alt={chat.name} />
+                      : chat.avatar
+                    }
+                  </div>
                   {chat.online && <span className="chat-online-dot" />}
                 </div>
                 <div className="chat-info">
                   <div className="chat-top">
                     <span className="chat-name">
                       {isPinned && <span className="pin-icon">📌</span>}
-                      {chat.name}
+                      {(getAlias && getAlias(chat.id)) || chat.name}
                       {chat.e2e && <LockSmallIcon />}
                     </span>
                     <span className="chat-time">{chat.time}</span>
@@ -214,7 +224,14 @@ export default function Sidebar({
       )}
 
       {showProfile && (
-        <ProfileModal user={user} onClose={() => setShowProfile(false)} />
+        <ProfileModal
+          user={user}
+          onClose={() => setShowProfile(false)}
+          isOwnProfile={true}
+          onSave={newName => saveUser && saveUser({ ...user, displayName: newName })}
+          canEditAvatar={!!saveUser}
+          onAvatarChange={dataUrl => saveUser && saveUser({ ...user, avatar: dataUrl })}
+        />
       )}
     </>
   )

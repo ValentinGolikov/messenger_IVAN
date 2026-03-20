@@ -23,5 +23,7 @@ export function useAuth() {
     setUser(null)
   }
 
-  return { user, saveUser, clearUser }
+  const displayName = user?.displayName || user?.name || 'Пользователь'
+
+  return { user, saveUser, clearUser, displayName }
 }

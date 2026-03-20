@@ -18,6 +18,7 @@
   align-items: center;
   gap: 12px;
   color: var(--text-muted);
+  animation: scale-in 0.25s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
 .empty-icon {
@@ -34,6 +35,23 @@
   border-bottom: 1px solid var(--border);
 }
 
+.chat-header-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  border-radius: 8px;
+  padding: 4px 6px;
+  margin: -4px -6px;
+  transition: background 0.12s;
+  text-align: left;
+}
+
+.chat-header-identity:hover {
+  background: var(--hover);
+}
+
 .chat-header-avatar {
   width: 40px;
   height: 40px;
@@ -46,6 +64,14 @@
   font-weight: 600;
   font-size: 16px;
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+.chat-header-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
 }
 
 .chat-header-info {
@@ -101,6 +127,8 @@
   overflow: hidden;
   min-width: 180px;
   z-index: 10;
+  animation: slide-down 0.12s ease both;
+  transform-origin: top right;
 }
 
 .dropdown button {
@@ -127,6 +155,7 @@
   background: var(--e2e-bg);
   border-bottom: 1px solid var(--e2e-border);
   padding: 7px 16px;
+  animation: slide-down 0.2s ease both;
 }
 
 /* Messages */
@@ -148,14 +177,19 @@
 
 .message {
   display: flex;
+  animation-duration: 0.22s;
+  animation-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
+  animation-fill-mode: both;
 }
 
 .message.me {
   justify-content: flex-end;
+  animation-name: msg-from-me;
 }
 
 .message.them {
   justify-content: flex-start;
+  animation-name: msg-from-them;
 }
 
 .message-bubble {
@@ -206,6 +240,60 @@
   opacity: 0.5;
   display: flex;
   align-items: center;
+}
+
+/* Inline reply quote */
+.msg-reply-quote {
+  display: flex;
+  gap: 7px;
+  padding: 5px 8px;
+  margin-bottom: 6px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.08);
+  cursor: default;
+  animation: slide-down 0.18s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  overflow: hidden;
+}
+
+.message.me .msg-reply-quote {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.msg-reply-bar {
+  width: 2.5px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+.message.me .msg-reply-bar {
+  background: #fff;
+}
+
+.msg-reply-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.msg-reply-sender {
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.msg-reply-text {
+  font-size: 12px;
+  opacity: 0.65;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
 }
 
 /* File attachment */
@@ -316,6 +404,65 @@
   cursor: default;
 }
 
+/* Date separator */
+.date-separator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.date-separator::before,
+.date-separator::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+  opacity: 0.6;
+}
+
+/* Scroll-to-bottom button */
+@keyframes slide-up {
+  from { transform: translateY(16px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.scroll-to-bottom-btn {
+  position: absolute;
+  bottom: 70px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: var(--text);
+  z-index: 5;
+  animation: slide-up 0.18s ease both;
+  transition: background 0.12s;
+}
+
+.scroll-to-bottom-btn:hover {
+  background: var(--hover);
+}
+
+/* Character counter */
+.char-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  min-width: 28px;
+  text-align: right;
+}
+
 /* Clear history confirm */
 .confirm-overlay {
   position: absolute;
@@ -326,6 +473,7 @@
   justify-content: center;
   z-index: 20;
   border-radius: inherit;
+  animation: fade-in 0.18s ease both;
 }
 
 .confirm-dialog {
@@ -335,6 +483,7 @@
   max-width: 320px;
   width: 90%;
   box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+  animation: scale-in 0.2s cubic-bezier(0.22, 0.61, 0.36, 1) both;
 }
 
 .confirm-dialog h3 {
