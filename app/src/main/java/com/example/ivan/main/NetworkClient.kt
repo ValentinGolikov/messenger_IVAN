@@ -54,7 +54,7 @@ data class MessageDto(
 )
 
 object NetworkClient {
-    private const val BASE_URL = BuildConfig.SERVER_URL
+    private const val BASE_URL = "http://${BuildConfig.SERVER_URL}"
 
     val httpClient = HttpClient(CIO) {
         install(ContentNegotiation) {
