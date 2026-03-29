@@ -5,7 +5,7 @@ import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
 import kotlinx.serialization.json.Json
-import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.*
 import java.util.concurrent.ConcurrentHashMap
 
 fun Application.configureSockets() {
@@ -22,17 +22,30 @@ fun Application.configureSockets() {
                         val text = frame.readText()
                         val message = Json.decodeFromString<ChatMessage>(text)
 
-                        DatabaseFactory.dbQuery {
+                        val senderName = DatabaseFactory.dbQuery {
                             Messages.insert {
                                 it[Messages.senderId] = userId
                                 it[Messages.text] = message.text
                                 it[Messages.timestamp] = message.timestamp
                             }
+
+                            Users.selectAll()
+                                .where { Users.id eq userId }
+                                .single()[Users.displayName]
                         }
 
-                        val broadcastFrame = Frame.Text(text)
+                        val outgoing = Json.encodeToString(
+                            MessageDto.serializer(),
+                            MessageDto(
+                                senderId = userId,
+                                senderName = senderName,
+                                text = message.text,
+                                timestamp = message.timestamp
+                            )
+                        )
+
                         connections.values.forEach { session ->
-                            session.send(broadcastFrame)
+                            session.send(Frame.Text(outgoing))
                         }
                     }
                 }
@@ -42,3 +55,4 @@ fun Application.configureSockets() {
         }
     }
 }
+

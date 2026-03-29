@@ -7,14 +7,15 @@ import org.jetbrains.exposed.sql.transactions.transaction
 
 object DatabaseFactory {
     fun init() {
-        val dbUser = System.getenv("DB_USER") ?: "default_user"
-        val dbPass = System.getenv("DB_PASSWORD") ?: "default_pass"
+        val dbUser = System.getenv("DB_USER")
+        val dbPassword = System.getenv("DB_PASSWORD")
+        val dbUrl = System.getenv("DB_URL")
 
         Database.connect(
-            url = "jdbc:postgresql://localhost:5432/PostgresLearning",
+            url = dbUrl,
             driver = "org.postgresql.Driver",
             user = dbUser,
-            password = dbPass
+            password = dbPassword,
         )
         transaction { SchemaUtils.create(Users, Messages) }
     }

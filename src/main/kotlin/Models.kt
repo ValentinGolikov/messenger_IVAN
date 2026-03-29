@@ -31,6 +31,14 @@ data class ChatMessage(
 )
 
 @Serializable
+data class MessageDto(
+    val senderId: Int,
+    val senderName: String,
+    val text: String,
+    val timestamp: Long
+)
+
+@Serializable
 data class AuthResponse(
     val userId: Int,
     val yandexData: YandexUserDto

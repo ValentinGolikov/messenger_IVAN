@@ -24,5 +24,30 @@ fun Application.configureRouting(authService: AuthService) {
 
             call.respond(AuthResponse(userId = userId, yandexData = yandexUser))
         }
+
+        get("/messages") {
+            val messages = DatabaseFactory.dbQuery {
+                (Messages innerJoin Users)
+                    .select(
+                        Messages.id,
+                        Messages.senderId,
+                        Users.displayName,
+                        Messages.text,
+                        Messages.timestamp
+                    )
+                    .orderBy(Messages.timestamp, SortOrder.DESC)
+                    .limit(50)
+                    .map { row ->
+                        MessageDto(
+                            senderId = row[Messages.senderId],
+                            senderName = row[Users.displayName],
+                            text = row[Messages.text],
+                            timestamp = row[Messages.timestamp]
+                        )
+                    }
+                    .reversed()
+            }
+            call.respond(messages)
+        }
     }
 }
