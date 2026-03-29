@@ -1,5 +1,6 @@
 package com.example.ivan.main
 
+import com.example.ivan.BuildConfig
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -7,8 +8,8 @@ import io.ktor.client.plugins.logging.LogLevel
 import io.ktor.client.plugins.logging.Logging
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.serialization.kotlinx.json.json
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.json.Json
 
 @Serializable
@@ -44,9 +45,16 @@ data class ChatMessage(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+@Serializable
+data class MessageDto(
+    val senderId: Int,
+    val senderName: String,
+    val text: String,
+    val timestamp: Long
+)
 
 object NetworkClient {
-    private const val BASE_URL = "http://192.168.0.105:8080"
+    private const val BASE_URL = BuildConfig.SERVER_URL
 
     val httpClient = HttpClient(CIO) {
         install(ContentNegotiation) {
@@ -55,7 +63,6 @@ object NetworkClient {
                 prettyPrint = true
             })
         }
-
         install(Logging) {
             level = LogLevel.BODY
         }

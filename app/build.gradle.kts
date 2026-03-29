@@ -7,6 +7,7 @@ if (localPropertiesFile.exists()) {
 }
 
 val yandexId = localProperties.getProperty("YANDEX_CLIENT_ID") ?: ""
+val serverUrl = localProperties.getProperty("SERVER_URL") ?: ""
 
 plugins {
     alias(libs.plugins.android.application)
@@ -29,6 +30,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         manifestPlaceholders["YANDEX_CLIENT_ID"] = yandexId
+        buildConfigField("String", "SERVER_URL", "\"$serverUrl\"")
     }
 
     buildTypes {
@@ -55,11 +57,13 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
 }
 
 dependencies {
+    implementation(libs.androidx.datastore.preferences)
     implementation(libs.ktor.client.logging)
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.serialization.kotlinx.json)
