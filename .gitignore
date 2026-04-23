@@ -13,6 +13,7 @@ out/
 /local.properties
 secret.properties
 backend/.gradle/
+backend/app/
 backend/build/
 backend/bin/
 backend/out/
