@@ -17,7 +17,16 @@ object DatabaseFactory {
             user = dbUser,
             password = dbPassword,
         )
-        transaction { SchemaUtils.create(Users, Messages) }
+        transaction {
+            SchemaUtils.create(
+                Users,
+                Contacts,
+                Chats,
+                ChatParticipants,
+                Messages,
+                ChatInvites
+            )
+        }
     }
 
     suspend fun <T> dbQuery(block: suspend () -> T): T =

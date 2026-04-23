@@ -17,17 +17,13 @@ fun Application.module() {
 
     val httpClient = HttpClient(CIO) {
         install(ClientContentNegotiation) {
-            json(Json {
-                ignoreUnknownKeys = true
-            })
+            json(Json { ignoreUnknownKeys = true })
         }
     }
 
     val authService = AuthService(httpClient)
 
-    install(ServerContentNegotiation) {
-        json()
-    }
+    install(ServerContentNegotiation) { json() }
     install(WebSockets)
 
     configureRouting(authService)
