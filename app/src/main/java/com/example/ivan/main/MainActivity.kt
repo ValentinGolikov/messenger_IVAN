@@ -1,33 +1,38 @@
 package com.example.ivan.main
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultLauncher
+import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.lifecycleScope
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.example.ivan.chat.ChatScreen
+import com.example.ivan.chats.ChatsScreen
 import com.yandex.authsdk.YandexAuthLoginOptions
 import com.yandex.authsdk.YandexAuthOptions
 import com.yandex.authsdk.YandexAuthResult
 import com.yandex.authsdk.YandexAuthSdk
 import com.yandex.authsdk.YandexAuthToken
-import io.ktor.client.call.body
-import io.ktor.client.request.forms.FormDataContent
-import io.ktor.client.statement.HttpResponse
-import io.ktor.http.Parameters
-import io.ktor.client.request.post
-import io.ktor.client.request.setBody
-import io.ktor.http.HttpStatusCode
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private lateinit var sdk: YandexAuthSdk
     private lateinit var launcher: ActivityResultLauncher<YandexAuthLoginOptions>
-    private var currentUserId: Int = -1
+
+    /**
+     * Holds the authenticated user ID.
+     * IMPORTANT: accessed only from the main thread after login completes.
+     * We use a StateFlow so the Compose navigation can react when it changes.
+     */
+    private val authState = kotlinx.coroutines.flow.MutableStateFlow<Int?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,19 +41,84 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val navController = rememberNavController()
-            NavHost(navController = navController, startDestination = "main") {
-                composable("main") {
-                    MainScreen(onNavigateToChat = { navController.navigate("chat") })
+            val userId = authState.collectAsState().value
+
+            NavHost(navController = navController, startDestination = "splash") {
+
+                composable("splash") {
+                    SplashScreen() // shown while login is in progress
                 }
-                composable("chat") {
-                    ChatScreen(userId = currentUserId)
+
+                composable("chats") {
+                    // Only reachable after userId is set
+                    ChatsScreen(
+                        userId = userId ?: return@composable,
+                        onOpenChat = { chatId, title ->
+                            navController.navigate("chat/$chatId?title=${Uri.encode(title)}")
+                        }
+                    )
+                }
+
+                composable(
+                    route = "chat/{chatId}?title={title}",
+                    arguments = listOf(
+                        navArgument("chatId") { type = NavType.IntType },
+                        navArgument("title") {
+                            type = NavType.StringType
+                            defaultValue = ""
+                        }
+                    )
+                ) { backStack ->
+                    val chatId = backStack.arguments?.getInt("chatId") ?: return@composable
+                    val title = backStack.arguments?.getString("title") ?: ""
+                    ChatScreen(
+                        userId = userId ?: return@composable,
+                        chatId = chatId,
+                        chatTitle = title,
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+
+                composable(
+                    route = "join/{token}",
+                    arguments = listOf(navArgument("token") { type = NavType.StringType })
+                ) { backStack ->
+                    val token = backStack.arguments?.getString("token") ?: return@composable
+                    JoinInviteScreen(
+                        userId = userId ?: return@composable,
+                        token = token,
+                        onJoined = { chatId, title ->
+                            navController.navigate("chat/$chatId?title=${Uri.encode(title)}") {
+                                popUpTo("chats") { inclusive = false }
+                            }
+                        },
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+            }
+
+            // Drive navigation from auth state
+            androidx.compose.runtime.LaunchedEffect(userId) {
+                if (userId != null) {
+                    // Check if there's a deep-link invite to handle
+                    val inviteToken = extractInviteToken(intent)
+                    if (inviteToken != null) {
+                        navController.navigate("join/$inviteToken") {
+                            popUpTo("splash") { inclusive = true }
+                        }
+                    } else {
+                        navController.navigate("chats") {
+                            popUpTo("splash") { inclusive = true }
+                        }
+                    }
                 }
             }
         }
 
+        // Start login flow
         lifecycleScope.launch {
             val savedToken = TokenStorage.getToken(this@MainActivity)
-            Log.d("test", "Сохранённый токен: $savedToken")
+            Log.d("IVAN", "Saved token: $savedToken")
             if (savedToken != null) {
                 val success = tryLoginWithToken(savedToken)
                 if (!success) {
@@ -61,26 +131,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Attempts login with [token].
+     * On success, saves userId into [authState] so navigation triggers.
+     * Returns true on success.
+     */
     private suspend fun tryLoginWithToken(token: String): Boolean {
         return try {
-            val response: HttpResponse = NetworkClient.httpClient.post(
-                NetworkClient.buildUrl("/login")
-            ) {
-                setBody(FormDataContent(Parameters.build {
-                    append("token", token)
-                }))
-            }
-
-            if (response.status == HttpStatusCode.Unauthorized) {
-                return false
-            }
-
-            val loginResponse: LoginResponse = response.body()
-            currentUserId = loginResponse.userId
-            Log.d("test", "Автовход: ${loginResponse.yandexData.displayName}. ID: $currentUserId")
+            val loginResponse = NetworkClient.login(token)
+            // ✅ FIX: authState is set BEFORE navigation happens (which reacts to authState).
+            authState.value = loginResponse.userId
+            Log.d("IVAN", "Logged in: ${loginResponse.yandexData.displayName}, id=${loginResponse.userId}")
             true
         } catch (e: Exception) {
-            Log.e("test", "Ошибка при входе", e)
+            Log.e("IVAN", "Login failed", e)
             false
         }
     }
@@ -95,19 +159,26 @@ class MainActivity : ComponentActivity() {
 
     private fun onSuccessAuth(token: YandexAuthToken) {
         lifecycleScope.launch {
-            Log.d("test", "Сохраняем токен: ${token.value}")
             TokenStorage.saveToken(this@MainActivity, token.value)
-            val saved = TokenStorage.getToken(this@MainActivity)
-            Log.d("test", "Токен после сохранения: $saved")
             tryLoginWithToken(token.value)
         }
     }
 
     private fun onProcessError(exception: Exception) {
-        TODO()
+        Log.e("IVAN", "Auth error", exception)
+        // TODO: show error UI
     }
 
     private fun onCancelled() {
-        TODO()
+        Log.d("IVAN", "Auth cancelled")
+        // Re-launch auth so the user can retry
+        launcher.launch(YandexAuthLoginOptions())
+    }
+
+    // Deep link: ivan://join/{token}  or  https://ivan.example.com/join/{token}
+    private fun extractInviteToken(intent: Intent?): String? {
+        val uri = intent?.data ?: return null
+        val path = uri.path ?: return null
+        return if (path.startsWith("/join/")) path.removePrefix("/join/") else null
     }
 }
