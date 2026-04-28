@@ -1,23 +1,30 @@
 import { useState } from 'react'
 import '../styles/add-chat.css'
 
-const MOCK_USERS = [
-  { id: 101, name: 'Дмитрий Новиков', username: 'dmitry_n', avatar: 'Д', online: false },
-  { id: 102, name: 'Анна Белова',      username: 'anna_b',   avatar: 'А', online: true  },
-  { id: 103, name: 'Сергей Попов',     username: 'sergey_p', avatar: 'С', online: false },
-  { id: 104, name: 'Елена Морозова',   username: 'elena_m',  avatar: 'Е', online: true  },
-  { id: 105, name: 'Николай Волков',   username: 'n_volkov', avatar: 'Н', online: false },
-]
-
-export default function AddChatModal({ existingIds, onAdd, onClose }) {
+export default function AddChatModal({ existingIds, onAdd, onClose, onSearch }) {
   const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
-  const results = MOCK_USERS.filter(u =>
-    !existingIds.includes(u.id) &&
-    (u.name.toLowerCase().includes(query.toLowerCase()) ||
-     u.username.toLowerCase().includes(query.toLowerCase()) ||
-     String(u.id).includes(query))
-  )
+  async function handleQueryChange(value) {
+    setQuery(value)
+    setError('')
+    if (!value.trim()) {
+      setResults([])
+      return
+    }
+    try {
+      setLoading(true)
+      const users = await onSearch(value.trim())
+      setResults((users || []).filter(u => !existingIds.includes(u.id)))
+    } catch (err) {
+      setError(err.message || 'Не удалось выполнить поиск')
+      setResults([])
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
     <div className="add-overlay" onClick={onClose}>
@@ -36,12 +43,14 @@ export default function AddChatModal({ existingIds, onAdd, onClose }) {
             type="text"
             placeholder="Имя, @username или ID..."
             value={query}
-            onChange={e => setQuery(e.target.value)}
+            onChange={e => handleQueryChange(e.target.value)}
           />
         </div>
 
         <div className="add-results">
-          {query && results.length === 0 && (
+          {loading && <p className="add-hint">Поиск...</p>}
+          {error && <p className="add-empty">{error}</p>}
+          {query && !loading && !error && results.length === 0 && (
             <p className="add-empty">Пользователи не найдены</p>
           )}
           {!query && (
@@ -54,12 +63,11 @@ export default function AddChatModal({ existingIds, onAdd, onClose }) {
               onClick={() => { onAdd(u); onClose() }}
             >
               <div className="add-user-avatar">
-                <span>{u.avatar}</span>
-                {u.online && <span className="add-online-dot" />}
+                <span>{(u.name || u.displayName || '?')[0]}</span>
               </div>
               <div className="add-user-info">
-                <span className="add-user-name">{u.name}</span>
-                <span className="add-user-username">@{u.username} · ID {u.id}</span>
+                <span className="add-user-name">{u.name || u.displayName}</span>
+                <span className="add-user-username">@{u.username || 'user'} · ID {u.id}</span>
               </div>
               <span className="add-start">Начать чат →</span>
             </button>

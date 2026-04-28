@@ -18,8 +18,7 @@ export function useAuth() {
   }
 
   function clearUser() {
-    localStorage.removeItem('user')
-    localStorage.removeItem('token')
+    localStorage.clear()
     setUser(null)
   }
 
