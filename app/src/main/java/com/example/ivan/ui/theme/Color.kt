@@ -2,10 +2,21 @@ package com.example.ivan.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val Purple80 = Color(0xFFD0BCFF)
-val PurpleGrey80 = Color(0xFFCCC2DC)
-val Pink80 = Color(0xFFEFB8C8)
+// ── Light theme ───────────────────────────────────────────────────────────────
+val Blue700       = Color(0xFF1A56DB)   // primary
+val Blue900       = Color(0xFF1E3A8A)   // primaryContainer
+val Violet600     = Color(0xFF7C3AED)   // secondary
+val Violet100     = Color(0xFFEDE9FE)   // secondaryContainer
+val Indigo500     = Color(0xFF6366F1)   // tertiary
+val Surface0      = Color(0xFFF8F9FF)   // background / surface
+val Surface1      = Color(0xFFEEF0FB)   // surfaceVariant
 
-val Purple40 = Color(0xFF6650a4)
-val PurpleGrey40 = Color(0xFF625b71)
-val Pink40 = Color(0xFF7D5260)
+// ── Dark theme ────────────────────────────────────────────────────────────────
+val Blue200       = Color(0xFF93C5FD)   // primary
+val Blue800       = Color(0xFF1E40AF)   // primaryContainer
+val Violet300     = Color(0xFFC4B5FD)   // secondary
+val Violet900     = Color(0xFF2E1065)   // secondaryContainer
+val Indigo300     = Color(0xFFA5B4FC)   // tertiary
+val Dark0         = Color(0xFF0F1117)   // background
+val Dark1         = Color(0xFF1A1D27)   // surface
+val Dark2         = Color(0xFF22263A)   // surfaceVariant

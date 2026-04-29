@@ -16,6 +16,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.ivan.chat.ChatScreen
 import com.example.ivan.chats.ChatsScreen
+import com.example.ivan.ui.theme.IvanTheme
 import com.yandex.authsdk.YandexAuthLoginOptions
 import com.yandex.authsdk.YandexAuthOptions
 import com.yandex.authsdk.YandexAuthResult
@@ -40,6 +41,7 @@ class MainActivity : ComponentActivity() {
         launcher = registerForActivityResult(sdk.contract) { result -> handleResult(result) }
 
         setContent {
+            IvanTheme {
             val navController = rememberNavController()
             val userId = authState.collectAsState().value
 
@@ -113,6 +115,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            } // IvanTheme
         }
 
         // Start login flow

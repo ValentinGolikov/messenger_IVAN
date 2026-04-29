@@ -3,15 +3,12 @@ package com.example.ivan.chat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.example.ivan.BuildConfig
 import com.example.ivan.main.ChatMessage
 import com.example.ivan.main.MessageDto
 import com.example.ivan.main.NetworkClient
 import com.example.ivan.main.UserDto
-import com.example.ivan.main.WsEnvelope
-import io.ktor.client.plugins.websocket.webSocket
+import com.example.ivan.main.WsManager
 import io.ktor.websocket.Frame
-import io.ktor.websocket.readText
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -31,11 +28,10 @@ class ChatViewModel(
     private val _memberSearchResults = MutableStateFlow<List<UserDto>>(emptyList())
     val memberSearchResults: StateFlow<List<UserDto>> = _memberSearchResults
 
-    private var wsSession: io.ktor.client.plugins.websocket.ClientWebSocketSession? = null
-
     init {
         loadHistory()
-        connectWebSocket()
+        // WsManager уже подключён из ChatsViewModel; просто слушаем входящие
+        listenIncoming()
     }
 
     private fun loadHistory() {
@@ -48,30 +44,15 @@ class ChatViewModel(
         }
     }
 
-    private fun connectWebSocket() {
+    private fun listenIncoming() {
         viewModelScope.launch {
-            try {
-                NetworkClient.httpClient.webSocket(
-                    "ws://${BuildConfig.SERVER_URL}/chat/$userId"
-                ) {
-                    wsSession = this
-                    for (frame in incoming) {
-                        if (frame is Frame.Text) {
-                            val envelope = Json.decodeFromString<WsEnvelope>(frame.readText())
-                            when (envelope.type) {
-                                "message" -> {
-                                    val msg = Json.decodeFromString<MessageDto>(envelope.payload)
-                                    // Only append if it belongs to this chat
-                                    if (msg.chatId == chatId) {
-                                        _messages.value = _messages.value + msg
-                                    }
-                                }
-                            }
-                        }
+            WsManager.incoming.collect { msg ->
+                if (msg.chatId == chatId) {
+                    // Добавляем только если ещё нет (дедупликация)
+                    if (_messages.value.none { it.id == msg.id }) {
+                        _messages.value = _messages.value + msg
                     }
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
             }
         }
     }
@@ -81,21 +62,17 @@ class ChatViewModel(
         viewModelScope.launch {
             try {
                 val msg = ChatMessage(chatId = chatId, text = text)
-                wsSession?.send(
-                    Frame.Text(Json.encodeToString(ChatMessage.serializer(), msg))
-                )
+                WsManager.send(Frame.Text(Json.encodeToString(ChatMessage.serializer(), msg)))
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
     }
 
-    /** Create (or fetch existing) invite link for this chat. */
     fun generateInviteLink() {
         viewModelScope.launch {
             try {
-                val token = NetworkClient.createInvite(chatId, userId)
-                _inviteToken.value = token
+                _inviteToken.value = NetworkClient.createInvite(chatId, userId)
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -103,10 +80,7 @@ class ChatViewModel(
     }
 
     fun searchUsersToInvite(query: String) {
-        if (query.isBlank()) {
-            _memberSearchResults.value = emptyList()
-            return
-        }
+        if (query.isBlank()) { _memberSearchResults.value = emptyList(); return }
         viewModelScope.launch {
             try {
                 _memberSearchResults.value = NetworkClient.searchUsers(query, userId)
