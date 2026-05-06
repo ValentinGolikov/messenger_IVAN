@@ -3,3 +3,6 @@
 .idea/
 dist/
 node_modules/
+.gradle/
+build/
+*.iml
