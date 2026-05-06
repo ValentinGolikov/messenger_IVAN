@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
+import { apiLogin } from '../lib/api'
 import '../styles/callback.css'
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080'
 
 export default function AuthCallbackPage() {
   const [searchParams] = useSearchParams()
@@ -13,7 +12,8 @@ export default function AuthCallbackPage() {
   const { saveUser } = useAuth()
 
   useEffect(() => {
-    const code = searchParams.get('code')
+    const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+    const accessToken = hash.get('access_token')
     const error = searchParams.get('error')
 
     if (error) {
@@ -22,32 +22,29 @@ export default function AuthCallbackPage() {
       return
     }
 
-    if (!code) {
+    if (!accessToken) {
       setStatus('error')
-      setErrorMsg('Код авторизации не получен')
+      setErrorMsg('Токен авторизации не получен')
       return
     }
 
-    exchangeCode(code)
+    exchangeToken(accessToken)
   }, [])
 
-  async function exchangeCode(code) {
+  async function exchangeToken(token) {
     try {
-      const res = await fetch(`${API_URL}/api/auth/yandex/callback`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code }),
-      })
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        throw new Error(data.message || `HTTP ${res.status}`)
+      const data = await apiLogin(token)
+      const user = {
+        id: data.userId,
+        name: data.yandexData?.displayName || data.yandexData?.realName || 'Пользователь',
+        displayName: data.yandexData?.displayName || null,
+        email: data.yandexData?.email || null,
+        username: data.yandexData?.login || null,
+        phone: data.yandexData?.defaultPhone?.number || null,
+        avatar: null,
       }
-
-      const data = await res.json()
-      // Ожидаемый формат: { token: string, user: { id, name, email, avatar } }
-      localStorage.setItem('token', data.token)
-      saveUser(data.user)
+      localStorage.setItem('token', token)
+      saveUser(user)
 
       setStatus('success')
       setTimeout(() => navigate('/'), 1000)

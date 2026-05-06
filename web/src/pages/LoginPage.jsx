@@ -7,7 +7,7 @@ const REDIRECT_URI = import.meta.env.VITE_REDIRECT_URI
 
 function buildYandexOAuthUrl() {
   const params = new URLSearchParams({
-    response_type: 'code',
+    response_type: 'token',
     client_id: YANDEX_CLIENT_ID,
     redirect_uri: REDIRECT_URI,
   })
