@@ -1,0 +1,278 @@
+.profile-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  animation: fade-in 0.18s ease both;
+}
+
+.profile-modal {
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 32px 28px;
+  width: 100%;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  animation: scale-in 0.22s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  position: relative;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.2);
+}
+
+.profile-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.profile-close:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* Wrapper holds both the circle and the online dot */
+.profile-avatar-wrapper {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  margin-bottom: 4px;
+}
+
+.profile-avatar-big {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: var(--blue);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  font-weight: 700;
+  overflow: hidden;
+  position: relative;
+}
+
+.profile-avatar-big img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.profile-avatar-letter {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Camera overlay — revealed on hover */
+.profile-avatar-edit {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 32px;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  opacity: 0;
+  transition: opacity 0.18s;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+
+.profile-avatar-big:hover .profile-avatar-edit {
+  opacity: 1;
+}
+
+.profile-online-dot {
+  position: absolute;
+  bottom: 3px;
+  right: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  border: 3px solid var(--surface);
+  z-index: 1;
+}
+
+.profile-online-dot.online {
+  background: #22c55e;
+}
+
+.profile-remove-photo {
+  font-size: 12px;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+  margin-top: -4px;
+}
+
+.profile-remove-photo:hover {
+  color: var(--text);
+}
+
+.profile-name {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.profile-username {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.profile-status {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.profile-info {
+  width: 100%;
+  background: var(--bg);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.profile-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.profile-row:last-child {
+  border-bottom: none;
+}
+
+.profile-label {
+  color: var(--text-muted);
+}
+
+.profile-value {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.profile-msg-btn {
+  margin-top: 8px;
+  width: 100%;
+  padding: 11px;
+  border-radius: 10px;
+  background: var(--blue);
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+
+.profile-msg-btn:hover {
+  background: var(--blue-hover);
+}
+
+.profile-name-input {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid var(--blue);
+  outline: none;
+  text-align: center;
+  width: 100%;
+  padding: 2px 4px;
+}
+
+.profile-save-btn {
+  margin-top: 2px;
+  padding: 6px 18px;
+  border-radius: 8px;
+  background: var(--blue);
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.profile-save-btn:hover:not(:disabled) {
+  background: var(--blue-hover);
+}
+
+.profile-save-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.profile-alias-section {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.profile-alias-section label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  padding: 0 2px;
+}
+
+.profile-alias-input {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.profile-alias-input:focus {
+  border-color: var(--blue);
+}
+
+.profile-alias-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  padding: 0 2px;
+}
+
+.profile-saved-msg {
+  font-size: 12px;
+  color: #22c55e;
+  font-weight: 600;
+  margin-top: 4px;
+  animation: fade-in 0.2s ease both;
+}
