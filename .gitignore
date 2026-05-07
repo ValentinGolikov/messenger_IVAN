@@ -22,6 +22,9 @@ backend/bin/
 backend/out/
 backend/local.properties
 backend/secret.properties
+backend/.env
+backend/.env.*
+!backend/.env.example
 !backend/gradle/wrapper/gradle-wrapper.jar
 .apt_generated
 .classpath

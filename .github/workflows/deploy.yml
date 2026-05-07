@@ -6,24 +6,42 @@ on:
       - main
 
 jobs:
-  deploy-backend:
+  detect-changes:
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    outputs:
+      backend: ${{ steps.changes.outputs.backend }}
+      web: ${{ steps.changes.outputs.web }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 2
 
-      - name: Check for Backend changes
-        id: check_files
+      - name: Detect changed paths
+        id: changes
         run: |
-          if git diff --name-only HEAD^ HEAD | grep -q "^backend/"; then
-            echo "changed=true" >> $GITHUB_OUTPUT
+          if git rev-parse HEAD^ >/dev/null 2>&1; then
+            CHANGED=$(git diff --name-only HEAD^ HEAD)
+          else
+            CHANGED=$(git diff-tree --no-commit-id --name-only -r HEAD)
           fi
 
+          if echo "$CHANGED" | grep -q "^backend/"; then
+            echo "backend=true" >> $GITHUB_OUTPUT
+          fi
+          if echo "$CHANGED" | grep -q "^web/"; then
+            echo "web=true" >> $GITHUB_OUTPUT
+          fi
+
+  deploy-backend:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend == 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Deploy Backend to VPS
-        if: steps.check_files.outputs.changed == 'true'
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -33,9 +51,8 @@ jobs:
           source: "backend/"
           target: "~/messenger_IVAN"
 
-      - name: Restart Backend Container
-        if: steps.check_files.outputs.changed == 'true'
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Restart Backend Containers
+        uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
           port: ${{ secrets.SERVER_PORT }}
@@ -48,22 +65,13 @@ jobs:
 
   deploy-web:
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    needs: detect-changes
+    if: needs.detect-changes.outputs.web == 'true'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-
-      - name: Check for Web changes
-        id: check_files
-        run: |
-          if git diff --name-only HEAD^ HEAD | grep -q "^web/"; then
-            echo "changed=true" >> $GITHUB_OUTPUT
-          fi
 
       - name: Deploy Web to VPS
-        if: steps.check_files.outputs.changed == 'true'
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -74,8 +82,7 @@ jobs:
           target: "~/messenger_IVAN"
 
       - name: Restart Web Container
-        if: steps.check_files.outputs.changed == 'true'
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SERVER_HOST }}
           port: ${{ secrets.SERVER_PORT }}
