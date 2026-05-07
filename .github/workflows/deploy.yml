@@ -4,13 +4,23 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      force_backend:
+        description: "Force deploy backend"
+        type: boolean
+        default: false
+      force_web:
+        description: "Force deploy web"
+        type: boolean
+        default: false
 
 jobs:
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
-      backend: ${{ steps.changes.outputs.backend }}
-      web: ${{ steps.changes.outputs.web }}
+      backend: ${{ steps.result.outputs.backend }}
+      web: ${{ steps.result.outputs.web }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -19,6 +29,7 @@ jobs:
 
       - name: Detect changed paths
         id: changes
+        if: github.event_name == 'push'
         run: |
           if git rev-parse HEAD^ >/dev/null 2>&1; then
             CHANGED=$(git diff --name-only HEAD^ HEAD)
@@ -32,6 +43,22 @@ jobs:
           if echo "$CHANGED" | grep -q "^web/"; then
             echo "web=true" >> $GITHUB_OUTPUT
           fi
+
+      - name: Compute final result
+        id: result
+        run: |
+          BACKEND="${{ steps.changes.outputs.backend }}"
+          WEB="${{ steps.changes.outputs.web }}"
+
+          if [ "${{ github.event.inputs.force_backend }}" == "true" ]; then
+            BACKEND="true"
+          fi
+          if [ "${{ github.event.inputs.force_web }}" == "true" ]; then
+            WEB="true"
+          fi
+
+          echo "backend=${BACKEND}" >> $GITHUB_OUTPUT
+          echo "web=${WEB}" >> $GITHUB_OUTPUT
 
   deploy-backend:
     runs-on: ubuntu-latest
@@ -60,7 +87,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd ~/messenger_IVAN/backend
-            docker compose up -d --build app
+            docker compose up -d --build
             docker image prune -f
 
   deploy-web:
