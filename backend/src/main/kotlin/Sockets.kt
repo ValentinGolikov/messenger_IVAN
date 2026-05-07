@@ -184,6 +184,7 @@ private suspend fun handleReadAck(
         val statusEvent = StatusUpdateEvent(
             messageId = messageId.toString(),
             chatId = ack.chatId,
+            senderId = senderId,
             status = "read"
         )
         val envelope = Json.encodeToString(

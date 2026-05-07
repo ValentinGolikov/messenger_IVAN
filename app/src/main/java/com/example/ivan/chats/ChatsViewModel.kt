@@ -45,6 +45,7 @@ class ChatsViewModel(private val userId: Int) : ViewModel() {
         collectChatRemoved()
         collectIncomingMessages()
         collectMessageDeleted()
+        collectStatusUpdates()
     }
 
     fun loadChats() {
@@ -141,6 +142,27 @@ class ChatsViewModel(private val userId: Int) : ViewModel() {
                 // If deleted message was the last one — reload to get correct lastMessage
                 if (chat.lastMessage?.id == event.messageId) {
                     loadChats()
+                }
+            }
+        }
+    }
+
+    /**
+     * Collect status update events (read/delivered).
+     * Updates unreadCount when messages are read.
+     */
+    private fun collectStatusUpdates() {
+        viewModelScope.launch {
+            WsManager.statusUpdates.collect { event ->
+                val current = _uiState.value as? ChatsUiState.Success ?: return@collect
+                val chat = current.chats.find { it.id == event.chatId } ?: return@collect
+                // If the read message is from someone else (not me), decrement unreadCount
+                if (event.status == "read" && event.senderId != userId) {
+                    val newUnread = maxOf(0, chat.unreadCount - 1)
+                    val updatedChats = current.chats.map { c ->
+                        if (c.id == chat.id) c.copy(unreadCount = newUnread) else c
+                    }
+                    _uiState.value = ChatsUiState.Success(updatedChats)
                 }
             }
         }

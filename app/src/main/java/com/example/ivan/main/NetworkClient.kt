@@ -123,6 +123,7 @@ data class WsEnvelope(
 data class StatusUpdateEvent(
     val messageId: String,
     val chatId: Int,
+    val senderId: Int,
     val status: String // "delivered" | "read"
 )
 

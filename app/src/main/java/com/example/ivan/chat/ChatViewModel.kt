@@ -77,7 +77,7 @@ class ChatViewModel(
                 val msgs = NetworkClient.getChatMessages(chatId, userId)
                 _messages.value = msgs
 
-                // Send read ack for the last message from other users
+                // Send read ack for all messages from other users
                 val lastFromOther = msgs.lastOrNull { it.senderId != userId }
                 if (lastFromOther != null && lastFromOther.id.isNotEmpty()) {
                     WsManager.sendReadAck(chatId, lastFromOther.id)

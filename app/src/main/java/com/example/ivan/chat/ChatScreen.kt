@@ -80,14 +80,35 @@ fun ChatScreen(
     // The latest pinned message (for the banner)
     val latestPinned = pinnedMessages.firstOrNull()
 
+    // Count unread messages (from other users)
+    val unreadCount = messages.count { it.senderId != userId && it.status != "read" }
+    
+    // Find first unread message index (for "new messages" divider)
+    val firstUnreadIndex = messages.indexOfFirst { it.senderId != userId && it.status != "read" }
+    
+    // Track if "new messages" divider has been scrolled past
+    var newMessagesDividerScrolled by remember { mutableStateOf(false) }
+    
     // Set other user for presence tracking in DM
     LaunchedEffect(otherUserId) {
         vm.setOtherUser(otherUserId)
     }
 
+    // Auto-scroll to bottom when messages change
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+    
+    // Check if "new messages" divider should be hidden (scrolled past)
+    LaunchedEffect(listState, firstUnreadIndex) {
+        if (firstUnreadIndex > 0 && !newMessagesDividerScrolled) {
+            // Check if we've scrolled past the divider
+            val firstVisibleIndex = listState.firstVisibleItemIndex
+            if (firstVisibleIndex >= firstUnreadIndex) {
+                newMessagesDividerScrolled = true
+            }
         }
     }
 
@@ -231,6 +252,28 @@ fun ChatScreen(
                 )
             }
 
+            // "New messages" divider - shown before first unread message
+            if (firstUnreadIndex > 0 && !newMessagesDividerScrolled) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                    ) {
+                        Text(
+                            "Новые сообщения",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+            }
+
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -238,7 +281,8 @@ fun ChatScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
-                contentPadding = PaddingValues(vertical = 8.dp)
+                contentPadding = PaddingValues(vertical = 8.dp),
+                reverseLayout = false  // Messages go top to bottom (old to new)
             ) {
                 items(messages, key = { it.id }) { message ->
                     // System messages: centered gray text
@@ -319,6 +363,16 @@ fun ChatScreen(
                                 }
                             }
                         }
+                    }
+                }
+            }
+
+            // Update newMessagesDividerScrolled when scrolling
+            LaunchedEffect(listState, firstUnreadIndex) {
+                if (firstUnreadIndex > 0 && !newMessagesDividerScrolled) {
+                    val firstVisibleIndex = listState.firstVisibleItemIndex
+                    if (firstVisibleIndex >= firstUnreadIndex) {
+                        newMessagesDividerScrolled = true
                     }
                 }
             }
@@ -1087,8 +1141,9 @@ fun formatLastSeen(timestamp: Long): String {
     val diffMs = now - timestamp
     val diffSec = diffMs / 1000
 
-    // <60 seconds
-    if (diffSec < 60) return "в сети"
+    // <60 seconds — but this is lastSeen, so user is offline
+    // Return "недавно" instead of "в сети"
+    if (diffSec < 60) return "недавно"
 
     // 1-59 minutes (has priority over today/yesterday)
     val diffMin = diffSec / 60
