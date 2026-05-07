@@ -60,6 +60,7 @@ fun ChatScreen(
     val otherUserOnline by vm.otherUserOnline.collectAsState()
     val pinnedMessage by vm.pinnedMessage.collectAsState()
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
 
     // Context menu state for long-press on messages
     var contextMenuMessage by remember { mutableStateOf<MessageDto?>(null) }
@@ -174,7 +175,7 @@ fun ChatScreen(
                         // Find the message index and scroll to it
                         val idx = messages.indexOfFirst { it.id == pinned.messageId }
                         if (idx >= 0) {
-                            kotlinx.coroutines.MainScope().launch {
+                            coroutineScope.launch {
                                 listState.animateScrollToItem(idx)
                             }
                         }
