@@ -1,6 +1,7 @@
 package com.example.ivan.chats
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -604,28 +605,65 @@ private fun SectionHeader(
     }
 }
 
-/** Displays Material icons for message status */
+/** Compact message status checkmarks drawn via Canvas — thin, Telegram-style */
 @Composable
 fun MessageStatusIcon(
     status: String,
     tint: Color,
-    size: Dp = 16.dp
+    size: Dp = 14.dp
 ) {
-    val icon = when (status) {
-        "sent" -> Icons.Default.Done
-        "delivered" -> Icons.Default.DoneAll
-        "read" -> Icons.Default.DoneAll
-        else -> Icons.Default.Done
+    if (status == "sending") {
+        // Clock icon for pending messages
+        Icon(
+            imageVector = Icons.Default.Schedule,
+            contentDescription = "Отправляется",
+            modifier = Modifier.size(size),
+            tint = tint
+        )
+        return
     }
-    Icon(
-        imageVector = icon,
-        contentDescription = when (status) {
-            "sent" -> "Отправлено"
-            "delivered" -> "Доставлено"
-            "read" -> "Прочитано"
-            else -> "Статус"
-        },
-        modifier = Modifier.size(size),
-        tint = tint
-    )
+
+    val double = status == "delivered" || status == "read"
+
+    Canvas(modifier = Modifier.size(if (double) size * 1.5f else size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val stroke = androidx.compose.ui.graphics.drawscope.Stroke(
+            width = (size.toPx() * 0.13f).coerceAtLeast(1.5f),
+            cap = androidx.compose.ui.graphics.StrokeCap.Round,
+            join = androidx.compose.ui.graphics.StrokeJoin.Round
+        )
+        val color = tint
+
+        // First checkmark (or only one for "sent")
+        val offset = if (double) w * 0.22f else 0f
+        val cx = if (double) w * 0.38f else w * 0.5f
+        val cy = h * 0.5f
+        val tickW = w * (if (double) 0.32f else 0.45f)
+        val tickH = h * 0.28f
+
+        drawPath(
+            path = androidx.compose.ui.graphics.Path().apply {
+                moveTo(cx - tickW * 0.6f + offset, cy)
+                lineTo(cx - tickW * 0.1f + offset, cy + tickH)
+                lineTo(cx + tickW * 0.6f + offset, cy - tickH)
+            },
+            color = color,
+            style = stroke
+        )
+
+        // Second checkmark for delivered/read
+        if (double) {
+            val cx2 = w * 0.72f
+            drawPath(
+                path = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(cx2 - tickW * 0.6f, cy)
+                    lineTo(cx2 - tickW * 0.1f, cy + tickH)
+                    lineTo(cx2 + tickW * 0.6f, cy - tickH)
+                },
+                color = color,
+                style = stroke
+            )
+        }
+    }
 }

@@ -17,6 +17,7 @@ import androidx.navigation.navArgument
 import com.example.ivan.chat.ChatScreen
 import com.example.ivan.chats.ChatsScreen
 import com.example.ivan.settings.SettingsScreen
+import com.example.ivan.ui.theme.IvanTheme
 import com.yandex.authsdk.YandexAuthLoginOptions
 import com.yandex.authsdk.YandexAuthOptions
 import com.yandex.authsdk.YandexAuthResult
@@ -51,6 +52,8 @@ class MainActivity : ComponentActivity() {
         isDarkTheme.value = ThemeManager.isDarkTheme(this)
 
         setContent {
+            val darkTheme = isDarkTheme.collectAsState().value
+            IvanTheme(darkTheme = darkTheme) {
             val navController = rememberNavController()
             val userId = authState.collectAsState().value
             val deepLinkToken = pendingInviteToken.collectAsState().value
@@ -75,10 +78,12 @@ class MainActivity : ComponentActivity() {
                 }
 
                 composable("settings") {
-                    // TODO: Add theme state management
                     SettingsScreen(
-                        isDarkTheme = false, // Will be managed later
-                        onThemeChanged = { /* TODO */ },
+                        isDarkTheme = darkTheme,
+                        onThemeChanged = { newValue ->
+                            isDarkTheme.value = newValue
+                            ThemeManager.setDarkTheme(this@MainActivity, newValue)
+                        },
                         onBack = { navController.popBackStack() }
                     )
                 }
@@ -160,6 +165,7 @@ class MainActivity : ComponentActivity() {
                     pendingInviteToken.value = null
                 }
             }
+            } // IvanTheme
         }
 
         // Start login flow

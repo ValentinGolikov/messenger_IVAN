@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.ivan.main.ChatDto
+import com.example.ivan.main.MessageDeletedEvent
 import com.example.ivan.main.NetworkClient
 import com.example.ivan.main.UserDto
 import com.example.ivan.main.UserPresenceDto
@@ -42,6 +43,8 @@ class ChatsViewModel(private val userId: Int) : ViewModel() {
         loadContacts()
         collectPresenceUpdates()
         collectChatRemoved()
+        collectIncomingMessages()
+        collectMessageDeleted()
     }
 
     fun loadChats() {
@@ -99,6 +102,45 @@ class ChatsViewModel(private val userId: Int) : ViewModel() {
                     _uiState.value = ChatsUiState.Success(
                         current.chats.filter { it.id != event.chatId }
                     )
+                }
+            }
+        }
+    }
+
+    /**
+     * Collect incoming messages from WsManager.
+     * Updates lastMessage and unreadCount for the relevant chat in real time.
+     */
+    private fun collectIncomingMessages() {
+        viewModelScope.launch {
+            WsManager.incoming.collect { msg ->
+                val current = _uiState.value as? ChatsUiState.Success ?: return@collect
+                val updatedChats = current.chats.map { chat ->
+                    if (chat.id != msg.chatId) return@map chat
+                    val newUnread = if (msg.senderId != userId) chat.unreadCount + 1
+                                   else chat.unreadCount
+                    chat.copy(
+                        lastMessage = msg,
+                        unreadCount = newUnread
+                    )
+                }
+                _uiState.value = ChatsUiState.Success(updatedChats)
+            }
+        }
+    }
+
+    /**
+     * Collect message deleted events.
+     * If the deleted message was the last one, reload the chat list to get the new last message.
+     */
+    private fun collectMessageDeleted() {
+        viewModelScope.launch {
+            WsManager.messageDeleted.collect { event ->
+                val current = _uiState.value as? ChatsUiState.Success ?: return@collect
+                val chat = current.chats.find { it.id == event.chatId } ?: return@collect
+                // If deleted message was the last one — reload to get correct lastMessage
+                if (chat.lastMessage?.id == event.messageId) {
+                    loadChats()
                 }
             }
         }

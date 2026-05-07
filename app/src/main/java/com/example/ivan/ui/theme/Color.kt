@@ -2,10 +2,24 @@ package com.example.ivan.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val Purple80 = Color(0xFFD0BCFF)
-val PurpleGrey80 = Color(0xFFCCC2DC)
-val Pink80 = Color(0xFFEFB8C8)
+// ── Light palette ─────────────────────────────────────────────────────────────
+val Indigo600      = Color(0xFF4F46E5)  // primary
+val Indigo50       = Color(0xFFEEF2FF)  // primaryContainer
+val Indigo900      = Color(0xFF312E81)  // onPrimaryContainer
+val Violet500      = Color(0xFF8B5CF6)  // secondary
+val Violet50       = Color(0xFFF5F3FF)  // secondaryContainer
+val Blue500        = Color(0xFF3B82F6)  // tertiary
+val Gray50         = Color(0xFFF9FAFB)  // background
+val Gray100        = Color(0xFFF3F4F6)  // surfaceVariant
+val Gray200        = Color(0xFFE5E7EB)  // outline
 
-val Purple40 = Color(0xFF6650a4)
-val PurpleGrey40 = Color(0xFF625b71)
-val Pink40 = Color(0xFF7D5260)
+// ── Dark palette ──────────────────────────────────────────────────────────────
+val Indigo800      = Color(0xFF3730A3)  // primaryContainer (dark)
+val Violet300      = Color(0xFFC4B5FD)  // secondary (dark)
+val Violet900      = Color(0xFF2E1065)  // secondaryContainer (dark)
+val Blue300        = Color(0xFF93C5FD)  // tertiary (dark)
+val Dark900        = Color(0xFF0D0F14)  // background (dark)
+val Dark800        = Color(0xFF141720)  // surface (dark)
+val Dark700        = Color(0xFF1C2030)  // surfaceVariant (dark)
+val Dark600        = Color(0xFF252A3A)  // surfaceContainer (dark)
+val Indigo700      = Color(0xFF4338CA)  // own message bubble (dark)

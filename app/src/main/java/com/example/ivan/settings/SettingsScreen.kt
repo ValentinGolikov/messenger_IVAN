@@ -1,5 +1,6 @@
 package com.example.ivan.settings
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -10,8 +11,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import java.io.BufferedReader
+import java.io.InputStreamReader
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -20,6 +27,9 @@ fun SettingsScreen(
     onThemeChanged: (Boolean) -> Unit,
     onBack: () -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val appVersion = remember { getAppVersion(context) }
+    
     Scaffold(
         topBar = {
             TopAppBar(
@@ -83,46 +93,7 @@ fun SettingsScreen(
                         )
                     }
                     
-                    Divider(modifier = Modifier.padding(start = 56.dp))
-                    
-                    // Информация о статус-баре
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PhoneAndroid,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Статус-бар",
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = "Всегда чёрный для лучшей видимости",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Surface(
-                            shape = MaterialTheme.shapes.small,
-                            color = Color.Black
-                        ) {
-                            Text(
-                                text = "ON",
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        }
-                    }
+                    HorizontalDivider(modifier = Modifier.padding(start = 56.dp))
                 }
             }
             
@@ -143,13 +114,13 @@ fun SettingsScreen(
                 Column {
                     ListItem(
                         headlineContent = { Text("Версия") },
-                        supportingContent = { Text("1.0.0") },
+                        supportingContent = { Text(appVersion) },
                         leadingContent = { Icon(Icons.Default.Info, contentDescription = null) }
                     )
-                    Divider()
+                    HorizontalDivider()
                     ListItem(
                         headlineContent = { Text("Разработчик") },
-                        supportingContent = { Text("Иван") },
+                        supportingContent = { Text("Circus_Shapeto_Dev") },
                         leadingContent = { Icon(Icons.Default.Person, contentDescription = null) }
                     )
                 }
@@ -157,5 +128,27 @@ fun SettingsScreen(
             
             Spacer(modifier = Modifier.height(32.dp))
         }
+    }
+}
+
+// ── Version parsing ───────────────────────────────────────────────────────────
+
+@Serializable
+data class VersionInfo(
+    val version: String,
+    val build: String,
+    val uiVersion: String
+)
+
+private fun getAppVersion(context: android.content.Context): String {
+    return try {
+        val inputStream = context.resources.openRawResource(com.example.ivan.R.raw.version)
+        val reader = BufferedReader(java.io.InputStreamReader(inputStream))
+        val jsonText = reader.use { it.readText() }
+        val versionInfo = Json.decodeFromString(VersionInfo.serializer(), jsonText)
+        versionInfo.uiVersion
+    } catch (e: Exception) {
+        e.printStackTrace()
+        "0.1.0"
     }
 }

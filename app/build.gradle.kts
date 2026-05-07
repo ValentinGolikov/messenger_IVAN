@@ -63,6 +63,7 @@ android {
 }
 
 dependencies {
+    implementation(libs.androidx.compose.ui.unit)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.ktor.client.logging)
     implementation(libs.ktor.client.content.negotiation)
@@ -80,6 +81,7 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.navigation.compose)
+    implementation("androidx.compose.material:material-icons-extended")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
