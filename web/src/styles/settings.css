@@ -304,3 +304,41 @@
   align-items: center;
   gap: 6px;
 }
+
+@media (max-width: 720px) {
+  .settings-overlay {
+    align-items: flex-end;
+    justify-content: center;
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .settings-panel {
+    width: 100%;
+    height: min(92dvh, 720px);
+    border-left: none;
+    border-top: 1px solid var(--border);
+    border-radius: 16px 16px 0 0;
+    animation: settings-slide-up 0.2s ease;
+  }
+
+  .settings-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .settings-row-control,
+  .settings-row-controls {
+    width: 100%;
+  }
+
+  .settings-select,
+  .settings-input {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@keyframes settings-slide-up {
+  from { transform: translateY(100%); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}

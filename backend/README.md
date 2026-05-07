@@ -20,6 +20,14 @@ Here's a list of features included in this project:
 | [Content Negotiation](https://start.ktor.io/p/content-negotiation)     | Provides automatic content conversion according to Content-Type and Accept headers |
 | [kotlinx.serialization](https://start.ktor.io/p/kotlinx-serialization) | Handles JSON serialization using kotlinx.serialization library                     |
 
+## Auth endpoints
+
+- `POST /login` - Yandex OAuth token login.
+- `POST /auth/password/register` - username/password registration.
+- `POST /auth/password/login` - username/password login.
+
+Password auth stores salted SHA-256 hashes in `password_accounts`. For production, replace this with a memory-hard password hashing algorithm such as Argon2id or bcrypt.
+
 ## Building & Running
 
 To build or run the project, use one of the following tasks:
@@ -40,4 +48,3 @@ If the server starts successfully, you'll see the following output:
 2024-12-04 14:32:45.584 [main] INFO  Application - Application started in 0.303 seconds.
 2024-12-04 14:32:45.682 [main] INFO  Application - Responding at http://0.0.0.0:8080
 ```
-

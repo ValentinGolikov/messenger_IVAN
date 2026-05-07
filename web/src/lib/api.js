@@ -27,6 +27,22 @@ export function apiLogin(token) {
   })
 }
 
+export function apiPasswordLogin(login, password) {
+  return request('/auth/password/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: encodeForm({ login, password }),
+  })
+}
+
+export function apiPasswordRegister(login, password, displayName) {
+  return request('/auth/password/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: encodeForm({ login, password, displayName }),
+  })
+}
+
 export function apiGetChats(userId) {
   return request(`/chats/${userId}`)
 }

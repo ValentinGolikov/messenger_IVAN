@@ -27,8 +27,8 @@ export default function ContextMenu({ items, position, onClose }) {
   // Не даём меню выйти за правый/нижний край экрана
   const MENU_W = 200
   const MENU_APPROX_H = items.length * 36
-  const x = Math.min(position.x, window.innerWidth - MENU_W - 8)
-  const y = Math.min(position.y, window.innerHeight - MENU_APPROX_H - 8)
+  const x = Math.max(8, Math.min(position.x, window.innerWidth - MENU_W - 8))
+  const y = Math.max(8, Math.min(position.y, window.innerHeight - MENU_APPROX_H - 8))
 
   return (
     <div

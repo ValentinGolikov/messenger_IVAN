@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
+import { apiPasswordLogin, apiPasswordRegister } from '../lib/api'
 import '../styles/login.css'
 
 const YANDEX_CLIENT_ID = import.meta.env.VITE_YANDEX_CLIENT_ID
@@ -17,6 +19,12 @@ function buildYandexOAuthUrl() {
 export default function LoginPage() {
   const { saveUser } = useAuth()
   const navigate = useNavigate()
+  const [authMode, setAuthMode] = useState('login')
+  const [login, setLogin] = useState('')
+  const [password, setPassword] = useState('')
+  const [displayName, setDisplayName] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
   function handleYandexLogin() {
     if (!YANDEX_CLIENT_ID) {
@@ -29,6 +37,38 @@ export default function LoginPage() {
   function handleDevLogin() {
     saveUser({ id: 0, name: 'Dev User', email: 'dev@test.local', avatar: null })
     navigate('/')
+  }
+
+  async function handlePasswordSubmit(e) {
+    e.preventDefault()
+    setError('')
+
+    if (login.trim().length < 3 || password.length < 6) {
+      setError('Логин от 3 символов, пароль от 6 символов')
+      return
+    }
+
+    try {
+      setLoading(true)
+      const data = authMode === 'login'
+        ? await apiPasswordLogin(login.trim(), password)
+        : await apiPasswordRegister(login.trim(), password, displayName.trim())
+
+      localStorage.setItem('token', data.token)
+      saveUser({
+        id: data.user.id,
+        name: data.user.name,
+        displayName: data.user.name,
+        email: data.user.email || null,
+        username: data.user.username,
+        avatar: null,
+      })
+      navigate('/')
+    } catch (err) {
+      setError(err.message || 'Не удалось войти')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -46,6 +86,62 @@ export default function LoginPage() {
 
         <h1 className="login-title">файлообменник ИВАН</h1>
         <p className="login-subtitle">Войдите, чтобы продолжить</p>
+
+        <form className="password-login-form" onSubmit={handlePasswordSubmit}>
+          <div className="login-mode-switch" role="tablist" aria-label="Режим входа">
+            <button
+              type="button"
+              className={authMode === 'login' ? 'active' : ''}
+              onClick={() => { setAuthMode('login'); setError('') }}
+            >
+              Вход
+            </button>
+            <button
+              type="button"
+              className={authMode === 'register' ? 'active' : ''}
+              onClick={() => { setAuthMode('register'); setError('') }}
+            >
+              Регистрация
+            </button>
+          </div>
+
+          {authMode === 'register' && (
+            <input
+              className="login-input"
+              type="text"
+              placeholder="Имя"
+              value={displayName}
+              onChange={e => setDisplayName(e.target.value)}
+              autoComplete="name"
+            />
+          )}
+
+          <input
+            className="login-input"
+            type="text"
+            placeholder="Логин"
+            value={login}
+            onChange={e => setLogin(e.target.value)}
+            autoComplete="username"
+          />
+
+          <input
+            className="login-input"
+            type="password"
+            placeholder="Пароль"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
+          />
+
+          {error && <p className="login-error">{error}</p>}
+
+          <button className="password-login-btn" type="submit" disabled={loading}>
+            {loading ? 'Проверяем...' : (authMode === 'login' ? 'Войти' : 'Создать аккаунт')}
+          </button>
+        </form>
+
+        <div className="login-divider"><span>или</span></div>
 
         <button className="yandex-btn" onClick={handleYandexLogin}>
           <YandexIcon />

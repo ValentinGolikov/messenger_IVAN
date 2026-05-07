@@ -30,3 +30,21 @@
 .emoji-btn:hover {
   background: var(--hover);
 }
+
+@media (max-width: 480px) {
+  .emoji-picker {
+    left: 8px;
+    right: 8px;
+    bottom: calc(100% + 8px);
+    width: auto;
+    grid-template-columns: repeat(8, 1fr);
+    max-height: min(38dvh, 260px);
+    overflow-y: auto;
+    transform-origin: bottom center;
+  }
+
+  .emoji-btn {
+    width: 100%;
+    min-width: 0;
+  }
+}

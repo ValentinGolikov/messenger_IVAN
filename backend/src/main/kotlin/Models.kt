@@ -33,6 +33,20 @@ data class AuthResponse(
     val yandexData: YandexUserDto
 )
 
+@Serializable
+data class PasswordUserDto(
+    val id: Int,
+    val name: String,
+    val email: String? = null,
+    val username: String
+)
+
+@Serializable
+data class PasswordAuthResponse(
+    val token: String,
+    val user: PasswordUserDto
+)
+
 // ── Chats ─────────────────────────────────────────────────────────────────────
 
 @Serializable

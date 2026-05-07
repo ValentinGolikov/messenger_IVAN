@@ -5,6 +5,9 @@
 ## Что реализовано
 
 - Вход через Яндекс OAuth (frontend получает `access_token` и отправляет его на backend).
+- Обычный вход по логину и паролю:
+  - `POST /auth/password/login`
+  - `POST /auth/password/register`
 - Авторизация через backend endpoint:
   - `POST /login`
 - Работа с чатами через backend:
