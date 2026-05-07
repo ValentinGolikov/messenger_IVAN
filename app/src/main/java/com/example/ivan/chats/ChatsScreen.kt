@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -34,7 +35,8 @@ import java.util.Locale
 @Composable
 fun ChatsScreen(
     userId: Int,
-    onOpenChat: (chatId: Int, title: String, chatType: String, otherUserId: Int?) -> Unit
+    onOpenChat: (chatId: Int, title: String, chatType: String, otherUserId: Int?) -> Unit,
+    onOpenSettings: () -> Unit = {}
 ) {
     val vm: ChatsViewModel = viewModel(factory = ChatsViewModel.Factory(userId))
     val uiState by vm.uiState.collectAsState()
@@ -57,6 +59,9 @@ fun ChatsScreen(
                     }
                     IconButton(onClick = { showNewChatSheet = true }) {
                         Icon(Icons.Default.Edit, contentDescription = "Новый чат")
+                    }
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Default.Settings, contentDescription = "Настройки")
                     }
                 }
             )
@@ -145,24 +150,63 @@ fun ChatsScreen(
                                 )
                             }
                         } else {
+                            // Разделяем чаты на личные и групповые
+                            val dmChats = s.chats.filter { it.type == "dm" }
+                            val groupChats = s.chats.filter { it.type == "group" }
+                            
                             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                                items(s.chats, key = { it.id }) { chat ->
-                                    val isOnline = chat.otherUserId?.let { onlineStatuses[it] } ?: false
-                                    val lastSeen = chat.otherUserId?.let { lastSeenMap[it] }
-                                    ChatListItem(
-                                        chat = chat,
-                                        currentUserId = userId,
-                                        isOtherOnline = isOnline,
-                                        otherLastSeen = lastSeen,
-                                        onClick = {
-                                            val title = chatTitle(chat)
-                                            onOpenChat(chat.id, title, chat.type, chat.otherUserId)
-                                        },
-                                        onLongClick = {
-                                            deleteChatTarget = chat
-                                        }
-                                    )
-                                    HorizontalDivider(modifier = Modifier.padding(start = 72.dp))
+                                // Секция личных сообщений
+                                if (dmChats.isNotEmpty()) {
+                                    item {
+                                        SectionHeader(
+                                            title = "Личные сообщения",
+                                            count = dmChats.size
+                                        )
+                                    }
+                                    items(dmChats, key = { it.id }) { chat ->
+                                        val isOnline = chat.otherUserId?.let { onlineStatuses[it] } ?: false
+                                        val lastSeen = chat.otherUserId?.let { lastSeenMap[it] }
+                                        ChatListItem(
+                                            chat = chat,
+                                            currentUserId = userId,
+                                            isOtherOnline = isOnline,
+                                            otherLastSeen = lastSeen,
+                                            onClick = {
+                                                val title = chatTitle(chat)
+                                                onOpenChat(chat.id, title, chat.type, chat.otherUserId)
+                                            },
+                                            onLongClick = {
+                                                deleteChatTarget = chat
+                                            }
+                                        )
+                                        HorizontalDivider(modifier = Modifier.padding(start = 72.dp))
+                                    }
+                                }
+                                
+                                // Секция групповых чатов
+                                if (groupChats.isNotEmpty()) {
+                                    item {
+                                        SectionHeader(
+                                            title = "Группы",
+                                            count = groupChats.size
+                                        )
+                                    }
+                                    items(groupChats, key = { it.id }) { chat ->
+                                        ChatListItem(
+                                            chat = chat,
+                                            currentUserId = userId,
+                                            isOtherOnline = false,
+                                            otherLastSeen = null,
+                                            onClick = {
+                                                val title = chatTitle(chat)
+                                                onOpenChat(chat.id, title, chat.type, chat.otherUserId)
+                                            },
+                                            onLongClick = {
+                                                deleteChatTarget = chat
+                                            }
+                                        )
+                                        HorizontalDivider(modifier = Modifier.padding(start = 72.dp))
+                                    }
                                 }
                             }
                         }
@@ -308,20 +352,13 @@ private fun ChatListItem(
                 }
                 // Status indicator for last message
                 if (chat.lastMessage != null && chat.lastMessage.senderId == currentUserId) {
-                    val statusText = when (chat.lastMessage.status) {
-                        "sent" -> "✓ "
-                        "delivered" -> "✓✓ "
-                        "read" -> "✓✓ "
-                        else -> ""
-                    }
-                    val statusColor = if (chat.lastMessage.status == "read")
-                        Color(0xFF64B5F6) else MaterialTheme.colorScheme.onSurfaceVariant
-                    Text(
-                        text = statusText,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = statusColor
+                    MessageStatusIcon(
+                        status = chat.lastMessage.status,
+                        size = 14.dp,
+                        tint = if (chat.lastMessage.status == "read")
+                            Color(0xFF64B5F6) else MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Spacer(modifier = Modifier.width(2.dp))
                 }
                 Text(
                     text = if (chat.lastMessage?.senderId == currentUserId)
@@ -533,3 +570,62 @@ private fun chatTitle(chat: ChatDto): String =
         "dm" -> chat.otherUserName ?: "Личные сообщения"
         else -> chat.title ?: "Группа"
     }
+
+@Composable
+private fun SectionHeader(
+    title: String,
+    count: Int
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant
+        ) {
+            Text(
+                text = count.toString(),
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+/** Displays Material icons for message status */
+@Composable
+fun MessageStatusIcon(
+    status: String,
+    tint: Color,
+    size: Dp = 16.dp
+) {
+    val icon = when (status) {
+        "sent" -> Icons.Default.Done
+        "delivered" -> Icons.Default.DoneAll
+        "read" -> Icons.Default.DoneAll
+        else -> Icons.Default.Done
+    }
+    Icon(
+        imageVector = icon,
+        contentDescription = when (status) {
+            "sent" -> "Отправлено"
+            "delivered" -> "Доставлено"
+            "read" -> "Прочитано"
+            else -> "Статус"
+        },
+        modifier = Modifier.size(size),
+        tint = tint
+    )
+}

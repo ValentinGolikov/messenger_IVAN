@@ -16,6 +16,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.ivan.chat.ChatScreen
 import com.example.ivan.chats.ChatsScreen
+import com.example.ivan.settings.SettingsScreen
 import com.yandex.authsdk.YandexAuthLoginOptions
 import com.yandex.authsdk.YandexAuthOptions
 import com.yandex.authsdk.YandexAuthResult
@@ -37,11 +38,17 @@ class MainActivity : ComponentActivity() {
 
     /** Deep link token received while app is already running */
     private val pendingInviteToken = MutableStateFlow<String?>(null)
+    
+    /** Theme state */
+    private val isDarkTheme = MutableStateFlow(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         sdk = YandexAuthSdk.create(YandexAuthOptions(this))
         launcher = registerForActivityResult(sdk.contract) { result -> handleResult(result) }
+        
+        // Load theme preference
+        isDarkTheme.value = ThemeManager.isDarkTheme(this)
 
         setContent {
             val navController = rememberNavController()
@@ -60,7 +67,19 @@ class MainActivity : ComponentActivity() {
                         userId = userId ?: return@composable,
                         onOpenChat = { chatId, title, chatType, otherUserId ->
                             navController.navigate("chat/$chatId?title=${Uri.encode(title)}&chatType=$chatType&otherUserId=${otherUserId ?: -1}")
+                        },
+                        onOpenSettings = {
+                            navController.navigate("settings")
                         }
+                    )
+                }
+
+                composable("settings") {
+                    // TODO: Add theme state management
+                    SettingsScreen(
+                        isDarkTheme = false, // Will be managed later
+                        onThemeChanged = { /* TODO */ },
+                        onBack = { navController.popBackStack() }
                     )
                 }
 

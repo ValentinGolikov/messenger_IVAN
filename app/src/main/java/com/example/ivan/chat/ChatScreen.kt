@@ -773,12 +773,14 @@ fun MessageBubble(
                     )
                     // Status indicator for own messages
                     if (isOwn) {
+                        Spacer(modifier = Modifier.width(2.dp))
                         MessageStatusIcon(
                             status = message.status,
                             tint = when (message.status) {
                                 "read" -> Color(0xFF64B5F6) // blue checkmarks
                                 else -> Color.White.copy(alpha = 0.7f)
-                            }
+                            },
+                            size = 14.dp
                         )
                     }
                 }
@@ -787,20 +789,29 @@ fun MessageBubble(
     }
 }
 
-/** Displays ✓ for sent, ✓✓ for delivered/read */
+/** Displays Material icons for message status */
 @Composable
-fun MessageStatusIcon(status: String, tint: Color) {
-    val text = when (status) {
-        "sent" -> "✓"
-        "delivered" -> "✓✓"
-        "read" -> "✓✓"
-        else -> ""
+fun MessageStatusIcon(
+    status: String,
+    tint: Color,
+    size: Dp = 16.dp
+) {
+    val icon = when (status) {
+        "sent" -> Icons.Default.Done
+        "delivered" -> Icons.Default.DoneAll
+        "read" -> Icons.Default.DoneAll
+        else -> Icons.Default.Done
     }
-    Text(
-        text = text,
-        fontSize = 11.sp,
-        color = tint,
-        fontWeight = FontWeight.Bold
+    Icon(
+        imageVector = icon,
+        contentDescription = when (status) {
+            "sent" -> "Отправлено"
+            "delivered" -> "Доставлено"
+            "read" -> "Прочитано"
+            else -> "Статус"
+        },
+        modifier = Modifier.size(size),
+        tint = tint
     )
 }
 
