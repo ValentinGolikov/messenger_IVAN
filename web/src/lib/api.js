@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || 'https://titlo10.fun:8080'
+const API_URL = import.meta.env.VITE_API_URL || '/api'
 
 function encodeForm(data) {
   const body = new URLSearchParams()

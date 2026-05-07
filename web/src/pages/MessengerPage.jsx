@@ -141,7 +141,14 @@ export default function MessengerPage() {
   }, [user?.id])
 
   function connectWs() {
-    const base = getApiBaseUrl().replace(/^http/, 'ws')
+    const raw = getApiBaseUrl()
+    let base
+    if (raw.startsWith('http')) {
+      base = raw.replace(/^http/, 'ws')
+    } else {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+      base = `${proto}://${location.host}${raw}`
+    }
     const ws = new WebSocket(`${base}/chat/${user.id}`)
     wsRef.current = ws
 
