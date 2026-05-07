@@ -18,7 +18,7 @@ object DatabaseFactory {
             password = dbPassword,
         )
         transaction {
-            SchemaUtils.create(
+            SchemaUtils.createMissingTablesAndColumns(
                 Users,
                 Contacts,
                 Chats,
