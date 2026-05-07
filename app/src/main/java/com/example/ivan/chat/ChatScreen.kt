@@ -30,13 +30,16 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ivan.main.MemberDto
 import com.example.ivan.main.MessageDto
 import com.example.ivan.main.PinnedMessageDto
 import com.example.ivan.main.UserDto
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import androidx.compose.ui.text.style.TextAlign
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -56,14 +59,25 @@ fun ChatScreen(
     var showMenu by remember { mutableStateOf(false) }
     var showInviteSheet by remember { mutableStateOf(false) }
     var showAddMemberSheet by remember { mutableStateOf(false) }
+    var showMembersSheet by remember { mutableStateOf(false) }
+    var showPinnedListSheet by remember { mutableStateOf(false) }
+    var showLeaveDialog by remember { mutableStateOf(false) }
+    var showDeleteGroupDialog by remember { mutableStateOf(false) }
+    var deleteMessageTarget by remember { mutableStateOf<MessageDto?>(null) }
     val inviteToken by vm.inviteToken.collectAsState()
     val otherUserOnline by vm.otherUserOnline.collectAsState()
-    val pinnedMessage by vm.pinnedMessage.collectAsState()
+    val otherUserLastSeen by vm.otherUserLastSeen.collectAsState()
+    val pinnedMessages by vm.pinnedMessages.collectAsState()
+    val members by vm.members.collectAsState()
+    val myRole by vm.myRole.collectAsState()
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
     // Context menu state for long-press on messages
     var contextMenuMessage by remember { mutableStateOf<MessageDto?>(null) }
+
+    // The latest pinned message (for the banner)
+    val latestPinned = pinnedMessages.firstOrNull()
 
     // Set other user for presence tracking in DM
     LaunchedEffect(otherUserId) {
@@ -112,8 +126,10 @@ fun ChatScreen(
                         Column {
                             Text(chatTitle, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
                             if (chatType == "dm") {
+                                val statusText = if (otherUserOnline) "в сети"
+                                    else otherUserLastSeen?.let { formatLastSeen(it) } ?: "не в сети"
                                 Text(
-                                    text = if (otherUserOnline) "в сети" else "не в сети",
+                                    text = statusText,
                                     fontSize = 12.sp,
                                     color = if (otherUserOnline) Color(0xFF4CAF50)
                                             else MaterialTheme.colorScheme.onSurfaceVariant
@@ -132,6 +148,17 @@ fun ChatScreen(
                         Icon(Icons.Default.MoreVert, contentDescription = "Меню")
                     }
                     DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                        if (chatType == "group") {
+                            DropdownMenuItem(
+                                text = { Text("Участники") },
+                                leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
+                                onClick = {
+                                    showMenu = false
+                                    vm.loadMembers()
+                                    showMembersSheet = true
+                                }
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Пригласить ссылкой") },
                             leadingIcon = {
@@ -157,6 +184,21 @@ fun ChatScreen(
                                 showAddMemberSheet = true
                             }
                         )
+                        if (chatType == "group") {
+                            HorizontalDivider()
+                            if (myRole == "owner") {
+                                DropdownMenuItem(
+                                    text = { Text("Удалить группу", color = MaterialTheme.colorScheme.error) },
+                                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                                    onClick = { showMenu = false; showDeleteGroupDialog = true }
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text("Покинуть группу", color = MaterialTheme.colorScheme.error) },
+                                leadingIcon = { Icon(Icons.Default.ExitToApp, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                                onClick = { showMenu = false; showLeaveDialog = true }
+                            )
+                        }
                     }
                 }
             )
@@ -168,15 +210,19 @@ fun ChatScreen(
                 .padding(innerPadding)
         ) {
             // ── Pinned message banner ─────────────────────────────────────────
-            pinnedMessage?.let { pinned ->
+            latestPinned?.let { pinned ->
                 PinnedMessageBanner(
                     pinned = pinned,
+                    totalPinned = pinnedMessages.size,
                     onClickScroll = {
-                        // Find the message index and scroll to it
-                        val idx = messages.indexOfFirst { it.id == pinned.messageId }
-                        if (idx >= 0) {
-                            coroutineScope.launch {
-                                listState.animateScrollToItem(idx)
+                        if (pinnedMessages.size > 1) {
+                            showPinnedListSheet = true
+                        } else {
+                            val idx = messages.indexOfFirst { it.id == pinned.messageId }
+                            if (idx >= 0) {
+                                coroutineScope.launch {
+                                    listState.animateScrollToItem(idx)
+                                }
                             }
                         }
                     },
@@ -194,6 +240,30 @@ fun ChatScreen(
                 contentPadding = PaddingValues(vertical = 8.dp)
             ) {
                 items(messages, key = { it.id }) { message ->
+                    // System messages: centered gray text
+                    if (message.messageType == "system") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            ) {
+                                Text(
+                                    text = message.text,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                    fontSize = 13.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                        return@items
+                    }
+
                     // Check if it's a join-link message
                     val inviteMsgToken = extractInviteToken(message.text)
                     if (inviteMsgToken != null) {
@@ -208,7 +278,7 @@ fun ChatScreen(
                             MessageBubble(
                                 message = message,
                                 isOwn = message.senderId == userId,
-                                isPinned = pinnedMessage?.messageId == message.id,
+                                isPinned = pinnedMessages.any { it.messageId == message.id },
                                 onLongPress = { contextMenuMessage = message }
                             )
                             // Context menu dropdown
@@ -220,7 +290,7 @@ fun ChatScreen(
                                     y = 0.dp
                                 )
                             ) {
-                                val isPinned = pinnedMessage?.messageId == message.id
+                                val isPinned = pinnedMessages.any { it.messageId == message.id }
                                 DropdownMenuItem(
                                     text = { Text(if (isPinned) "Открепить" else "Закрепить") },
                                     leadingIcon = {
@@ -231,13 +301,21 @@ fun ChatScreen(
                                     },
                                     onClick = {
                                         contextMenuMessage = null
-                                        if (isPinned) {
-                                            vm.unpinMessage(message.id)
-                                        } else {
-                                            vm.pinMessage(message.id)
-                                        }
+                                        if (isPinned) vm.unpinMessage(message.id)
+                                        else vm.pinMessage(message.id)
                                     }
                                 )
+                                // Delete option: in DM — any message; in group — only own
+                                if (chatType == "dm" || message.senderId == userId) {
+                                    DropdownMenuItem(
+                                        text = { Text("Удалить", color = MaterialTheme.colorScheme.error) },
+                                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                                        onClick = {
+                                            contextMenuMessage = null
+                                            deleteMessageTarget = message
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -341,6 +419,143 @@ fun ChatScreen(
             onDismiss = { showAddMemberSheet = false }
         )
     }
+
+    // ── Delete message dialog ─────────────────────────────────────────────────
+    deleteMessageTarget?.let { msg ->
+        var forAll by remember { mutableStateOf(false) }
+        AlertDialog(
+            onDismissRequest = { deleteMessageTarget = null },
+            title = { Text("Удалить сообщение") },
+            text = {
+                Column {
+                    Text("Удалить это сообщение?")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = forAll, onCheckedChange = { forAll = it })
+                        val label = if (chatType == "dm") "Также у собеседника" else "Удалить у всех"
+                        Text(label, modifier = Modifier.clickable { forAll = !forAll })
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.deleteMessage(msg.id, forAll)
+                    deleteMessageTarget = null
+                }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteMessageTarget = null }) { Text("Отмена") }
+            }
+        )
+    }
+
+    // ── Delete group dialog ───────────────────────────────────────────────────
+    if (showDeleteGroupDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteGroupDialog = false },
+            title = { Text("Удалить группу") },
+            text = { Text("Группа будет удалена для всех участников. Это действие нельзя отменить.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteGroupDialog = false
+                    vm.deleteGroup { onBack() }
+                }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteGroupDialog = false }) { Text("Отмена") }
+            }
+        )
+    }
+
+    // ── Leave group dialog ────────────────────────────────────────────────────
+    if (showLeaveDialog) {
+        if (myRole == "owner") {
+            // Owner must pick a new admin
+            var selectedNewOwner by remember { mutableStateOf<Int?>(null) }
+            LaunchedEffect(Unit) { vm.loadMembers() }
+            AlertDialog(
+                onDismissRequest = { showLeaveDialog = false },
+                title = { Text("Покинуть группу") },
+                text = {
+                    Column {
+                        Text("Вы администратор. Выберите нового администратора:")
+                        Spacer(modifier = Modifier.height(8.dp))
+                        val otherMembers = members.filter { it.id != userId }
+                        otherMembers.forEach { member ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { selectedNewOwner = member.id }
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RadioButton(
+                                    selected = selectedNewOwner == member.id,
+                                    onClick = { selectedNewOwner = member.id }
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(member.displayName)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showLeaveDialog = false
+                            vm.leaveGroup(newOwnerId = selectedNewOwner) { onBack() }
+                        },
+                        enabled = selectedNewOwner != null
+                    ) { Text("Покинуть", color = MaterialTheme.colorScheme.error) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showLeaveDialog = false }) { Text("Отмена") }
+                }
+            )
+        } else {
+            AlertDialog(
+                onDismissRequest = { showLeaveDialog = false },
+                title = { Text("Покинуть группу") },
+                text = { Text("Вы уверены, что хотите покинуть группу?") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showLeaveDialog = false
+                        vm.leaveGroup { onBack() }
+                    }) { Text("Покинуть", color = MaterialTheme.colorScheme.error) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showLeaveDialog = false }) { Text("Отмена") }
+                }
+            )
+        }
+    }
+
+    // ── Pinned messages list sheet ─────────────────────────────────────────────
+    if (showPinnedListSheet) {
+        PinnedListSheet(
+            pinnedMessages = pinnedMessages,
+            onDismiss = { showPinnedListSheet = false },
+            onScrollTo = { msgId ->
+                showPinnedListSheet = false
+                val idx = messages.indexOfFirst { it.id == msgId }
+                if (idx >= 0) {
+                    coroutineScope.launch { listState.animateScrollToItem(idx) }
+                }
+            },
+            onUnpin = { msgId -> vm.unpinMessage(msgId) }
+        )
+    }
+
+    // ── Members list sheet ────────────────────────────────────────────────────
+    if (showMembersSheet) {
+        MemberListSheet(
+            members = members,
+            myRole = myRole,
+            onDismiss = { showMembersSheet = false },
+            onKick = { targetId -> vm.kickMember(targetId) },
+            onTransferOwner = { targetId -> vm.transferOwner(targetId) }
+        )
+    }
 }
 
 // ── Pinned message banner ────────────────────────────────────────────────────
@@ -348,6 +563,7 @@ fun ChatScreen(
 @Composable
 private fun PinnedMessageBanner(
     pinned: PinnedMessageDto,
+    totalPinned: Int = 1,
     onClickScroll: () -> Unit,
     onUnpin: () -> Unit
 ) {
@@ -372,8 +588,9 @@ private fun PinnedMessageBanner(
             )
             Spacer(modifier = Modifier.width(8.dp))
             Column(modifier = Modifier.weight(1f)) {
+                val label = if (totalPinned > 1) "Закреплённые ($totalPinned)" else "Закреплённое сообщение"
                 Text(
-                    "Закреплённое сообщение",
+                    label,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary
@@ -666,4 +883,223 @@ private fun InviteLinkBubble(
             }
         }
     }
+}
+
+// ── Pinned messages list sheet ─────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PinnedListSheet(
+    pinnedMessages: List<PinnedMessageDto>,
+    onDismiss: () -> Unit,
+    onScrollTo: (messageId: String) -> Unit,
+    onUnpin: (messageId: String) -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 16.dp)
+        ) {
+            Text(
+                "Закреплённые сообщения",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            pinnedMessages.forEach { pin ->
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                        .clickable { onScrollTo(pin.messageId) },
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                pin.senderName,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                pin.text,
+                                fontSize = 14.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        IconButton(
+                            onClick = { onUnpin(pin.messageId) },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Открепить",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Members list sheet ───────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MemberListSheet(
+    members: List<MemberDto>,
+    myRole: String,
+    onDismiss: () -> Unit,
+    onKick: (targetId: Int) -> Unit,
+    onTransferOwner: (targetId: Int) -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 16.dp)
+        ) {
+            Text(
+                "Участники (${members.size})",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            members.forEach { member ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Avatar placeholder
+                    Surface(
+                        modifier = Modifier.size(40.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                member.displayName.firstOrNull()?.uppercase() ?: "?",
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(member.displayName, fontWeight = FontWeight.Medium)
+                            if (member.role == "owner") {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                ) {
+                                    Text(
+                                        "Админ",
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                        val status = if (member.online) "в сети"
+                            else member.lastSeen?.let { formatLastSeen(it) } ?: "не в сети"
+                        Text(
+                            status,
+                            fontSize = 12.sp,
+                            color = if (member.online) Color(0xFF4CAF50)
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    // Actions for owner (except on self)
+                    if (myRole == "owner" && member.role != "owner") {
+                        var showMemberMenu by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton(onClick = { showMemberMenu = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "Действия")
+                            }
+                            DropdownMenu(
+                                expanded = showMemberMenu,
+                                onDismissRequest = { showMemberMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Передать права") },
+                                    leadingIcon = { Icon(Icons.Default.Star, contentDescription = null) },
+                                    onClick = { showMemberMenu = false; onTransferOwner(member.id) }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Исключить", color = MaterialTheme.colorScheme.error) },
+                                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                                    onClick = { showMemberMenu = false; onKick(member.id) }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Last seen formatter (Telegram-style) ───────────────────────────────
+
+private fun pluralMinutes(n: Long): String {
+    val mod10 = n % 10
+    val mod100 = n % 100
+    return when {
+        mod100 in 11..19 -> "минут"
+        mod10 == 1L -> "минуту"
+        mod10 in 2..4 -> "минуты"
+        else -> "минут"
+    }
+}
+
+fun formatLastSeen(timestamp: Long): String {
+    val now = System.currentTimeMillis()
+    val diffMs = now - timestamp
+    val diffSec = diffMs / 1000
+
+    // <60 seconds
+    if (diffSec < 60) return "в сети"
+
+    // 1-59 minutes (has priority over today/yesterday)
+    val diffMin = diffSec / 60
+    if (diffMin < 60) return "$diffMin ${pluralMinutes(diffMin)} назад"
+
+    // Calendar-day checks
+    val cal = Calendar.getInstance()
+    val todayStart = Calendar.getInstance().apply {
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+    val yesterdayStart = todayStart - 24 * 60 * 60 * 1000
+
+    val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+    val timeStr = timeFormat.format(Date(timestamp))
+
+    if (timestamp >= todayStart) return "сегодня в $timeStr"
+    if (timestamp >= yesterdayStart) return "вчера в $timeStr"
+
+    val diffDays = diffMs / (24 * 60 * 60 * 1000)
+    if (diffDays <= 7) return "на этой неделе"
+    if (diffDays <= 30) return "в этом месяце"
+    return "давно"
 }

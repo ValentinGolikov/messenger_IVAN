@@ -183,13 +183,34 @@ fun Application.configureRouting(authService: AuthService) {
         get("/chats/{chatId}/messages") {
             val chatId = call.parameters["chatId"]?.toIntOrNull()
                 ?: return@get call.respond(HttpStatusCode.BadRequest)
+            val userId = call.request.queryParameters["userId"]?.toIntOrNull()
+
+            // Per-user deleted message IDs
+            val deletedIds = if (userId != null) {
+                DatabaseFactory.dbQuery {
+                    DeletedMessagesPerUser.selectAll()
+                        .where { (DeletedMessagesPerUser.userId eq userId) and (DeletedMessagesPerUser.chatId eq chatId) }
+                        .map { it[DeletedMessagesPerUser.messageId] }.toSet()
+                }
+            } else emptySet()
+
+            // clearedAt for DM "delete for self"
+            val clearedAt = if (userId != null) {
+                DatabaseFactory.dbQuery {
+                    ChatParticipants.selectAll()
+                        .where { (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq userId) }
+                        .singleOrNull()?.get(ChatParticipants.clearedAt)
+                }
+            } else null
 
             val senderNames = mutableMapOf<Int, String>()
 
             val messages = CassandraFactory.getMessages(chatId, 50)
                 .filter { !it.isDeleted }
+                .filter { it.id.toString() !in deletedIds }
+                .filter { clearedAt == null || it.timestamp > clearedAt }
                 .map { msg ->
-                    val senderName = senderNames.getOrPut(msg.senderId) {
+                    val senderName = if (msg.senderId == 0) "Система" else senderNames.getOrPut(msg.senderId) {
                         DatabaseFactory.dbQuery {
                             Users.selectAll()
                                 .where { Users.id eq msg.senderId }
@@ -203,7 +224,8 @@ fun Application.configureRouting(authService: AuthService) {
                         senderName = senderName,
                         text = msg.text,
                         timestamp = msg.timestamp,
-                        status = msg.status
+                        status = msg.status,
+                        messageType = msg.messageType
                     )
                 }
             call.respond(messages)
@@ -454,7 +476,7 @@ fun Application.configureRouting(authService: AuthService) {
 
         // ── Pinned messages ──────────────────────────────────────────────────
 
-        /** Pin a message in a chat */
+        /** Pin a message in a chat (allows multiple pins) */
         post("/chats/{chatId}/pin") {
             val chatId = call.parameters["chatId"]?.toIntOrNull()
                 ?: return@post call.respond(HttpStatusCode.BadRequest)
@@ -464,7 +486,6 @@ fun Application.configureRouting(authService: AuthService) {
             val messageId = params["messageId"]
                 ?: return@post call.respond(HttpStatusCode.BadRequest)
 
-            // Verify user is a participant
             val isMember = DatabaseFactory.dbQuery {
                 ChatParticipants.selectAll()
                     .where { (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq userId) }
@@ -474,10 +495,9 @@ fun Application.configureRouting(authService: AuthService) {
 
             val now = System.currentTimeMillis()
 
-            // Remove any existing pin for this chat, then insert the new one
+            // Insert new pin (no longer deletes previous pins)
             DatabaseFactory.dbQuery {
-                PinnedMessages.deleteWhere { PinnedMessages.chatId eq chatId }
-                PinnedMessages.insert {
+                PinnedMessages.upsert(PinnedMessages.chatId, PinnedMessages.messageId) {
                     it[PinnedMessages.chatId] = chatId
                     it[PinnedMessages.messageId] = messageId
                     it[pinnedBy] = userId
@@ -485,10 +505,9 @@ fun Application.configureRouting(authService: AuthService) {
                 }
             }
 
-            // Build DTO and broadcast via WS
             val pinnedDto = buildPinnedMessageDto(chatId, messageId, userId, now)
             if (pinnedDto != null) {
-                val event = PinEvent(chatId = chatId, pinnedMessage = pinnedDto)
+                val event = PinEvent(chatId = chatId, pinnedMessage = pinnedDto, action = "pin")
                 val envelope = WsEnvelope(
                     type = "pin_update",
                     payload = Json.encodeToString(PinEvent.serializer(), event)
@@ -499,7 +518,7 @@ fun Application.configureRouting(authService: AuthService) {
             call.respond(pinnedDto ?: HttpStatusCode.OK)
         }
 
-        /** Unpin a message in a chat */
+        /** Unpin a specific message */
         delete("/chats/{chatId}/pin") {
             val chatId = call.parameters["chatId"]?.toIntOrNull()
                 ?: return@delete call.respond(HttpStatusCode.BadRequest)
@@ -522,8 +541,8 @@ fun Application.configureRouting(authService: AuthService) {
                 }
             }
 
-            // Broadcast unpin
-            val event = PinEvent(chatId = chatId, pinnedMessage = null)
+            val unpinDto = buildPinnedMessageDto(chatId, messageId, userId, System.currentTimeMillis())
+            val event = PinEvent(chatId = chatId, pinnedMessage = unpinDto, action = "unpin")
             val envelope = WsEnvelope(
                 type = "pin_update",
                 payload = Json.encodeToString(PinEvent.serializer(), event)
@@ -533,30 +552,380 @@ fun Application.configureRouting(authService: AuthService) {
             call.respond(HttpStatusCode.OK)
         }
 
-        /** Get pinned message for a chat */
-        get("/chats/{chatId}/pin") {
+        /** Get ALL pinned messages for a chat (list, sorted by pinnedAt DESC) */
+        get("/chats/{chatId}/pins") {
             val chatId = call.parameters["chatId"]?.toIntOrNull()
                 ?: return@get call.respond(HttpStatusCode.BadRequest)
 
-            val pinRow = DatabaseFactory.dbQuery {
+            val pinRows = DatabaseFactory.dbQuery {
                 PinnedMessages.selectAll()
                     .where { PinnedMessages.chatId eq chatId }
+                    .orderBy(PinnedMessages.pinnedAt, SortOrder.DESC)
+                    .toList()
+            }
+
+            val dtos = pinRows.mapNotNull { row ->
+                buildPinnedMessageDto(
+                    chatId,
+                    row[PinnedMessages.messageId],
+                    row[PinnedMessages.pinnedBy],
+                    row[PinnedMessages.pinnedAt]
+                )
+            }
+            call.respond(dtos)
+        }
+
+        // ── Message deletion ─────────────────────────────────────────────────
+
+        /** Delete a message (for self or for all) */
+        post("/chats/{chatId}/messages/{messageId}/delete") {
+            val chatId = call.parameters["chatId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val messageId = call.parameters["messageId"]
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val params = call.receiveParameters()
+            val userId = params["userId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val forAll = params["forAll"]?.toBoolean() ?: false
+
+            // Verify user is a participant
+            val isMember = DatabaseFactory.dbQuery {
+                ChatParticipants.selectAll()
+                    .where { (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq userId) }
+                    .count() > 0
+            }
+            if (!isMember) return@post call.respond(HttpStatusCode.Forbidden)
+
+            val uuid = try { UUID.fromString(messageId) }
+                       catch (_: Exception) { return@post call.respond(HttpStatusCode.BadRequest) }
+
+            if (forAll) {
+                // In group chats, only own messages can be deleted for all
+                val chatType = DatabaseFactory.dbQuery {
+                    Chats.selectAll().where { Chats.id eq chatId }.singleOrNull()?.get(Chats.type)
+                }
+                if (chatType == "group") {
+                    val msg = CassandraFactory.getMessageById(chatId, uuid)
+                    if (msg != null && msg.senderId != userId) {
+                        return@post call.respond(HttpStatusCode.Forbidden)
+                    }
+                }
+
+                CassandraFactory.deleteMessageForAll(chatId, uuid)
+
+                // Broadcast to all participants
+                val event = MessageDeletedEvent(chatId = chatId, messageId = messageId)
+                val envelope = WsEnvelope(
+                    type = "message_deleted",
+                    payload = Json.encodeToString(MessageDeletedEvent.serializer(), event)
+                )
+                launch { ConnectionManager.broadcastToChat(chatId, envelope) }
+            } else {
+                // Delete for self only
+                DatabaseFactory.dbQuery {
+                    DeletedMessagesPerUser.upsert(
+                        DeletedMessagesPerUser.userId,
+                        DeletedMessagesPerUser.chatId,
+                        DeletedMessagesPerUser.messageId
+                    ) {
+                        it[DeletedMessagesPerUser.userId] = userId
+                        it[DeletedMessagesPerUser.chatId] = chatId
+                        it[DeletedMessagesPerUser.messageId] = messageId
+                    }
+                }
+            }
+            call.respond(HttpStatusCode.OK)
+        }
+
+        // ── Chat deletion ────────────────────────────────────────────────────
+
+        /** Delete a DM chat (for self or for both) */
+        post("/chats/{chatId}/delete") {
+            val chatId = call.parameters["chatId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val params = call.receiveParameters()
+            val userId = params["userId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val forAll = params["forAll"]?.toBoolean() ?: false
+
+            // Verify it's a DM and user is a participant
+            val chatType = DatabaseFactory.dbQuery {
+                Chats.selectAll().where { Chats.id eq chatId }.singleOrNull()?.get(Chats.type)
+            }
+            if (chatType != "dm") return@post call.respond(HttpStatusCode.BadRequest)
+
+            if (forAll) {
+                // Delete for both: remove chat, participants, messages
+                CassandraFactory.deleteAllChatMessages(chatId)
+                DatabaseFactory.dbQuery {
+                    PinnedMessages.deleteWhere { PinnedMessages.chatId eq chatId }
+                    ChatParticipants.deleteWhere { ChatParticipants.chatId eq chatId }
+                    Chats.deleteWhere { Chats.id eq chatId }
+                }
+                // Notify the other user
+                val event = ChatRemovedEvent(chatId = chatId, reason = "deleted")
+                val envelope = WsEnvelope(
+                    type = "chat_removed",
+                    payload = Json.encodeToString(ChatRemovedEvent.serializer(), event)
+                )
+                launch { ConnectionManager.broadcastToChat(chatId, envelope) }
+            } else {
+                // Delete for self: set clearedAt
+                val now = System.currentTimeMillis()
+                DatabaseFactory.dbQuery {
+                    ChatParticipants.update({
+                        (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq userId)
+                    }) {
+                        it[clearedAt] = now
+                    }
+                }
+            }
+            call.respond(HttpStatusCode.OK)
+        }
+
+        // ── Leave / delete group ─────────────────────────────────────────────
+
+        /** Leave a group chat */
+        post("/chats/{chatId}/leave") {
+            val chatId = call.parameters["chatId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val params = call.receiveParameters()
+            val userId = params["userId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val newOwnerId = params["newOwnerId"]?.toIntOrNull()
+
+            val participant = DatabaseFactory.dbQuery {
+                ChatParticipants.selectAll()
+                    .where { (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq userId) }
                     .singleOrNull()
+            } ?: return@post call.respond(HttpStatusCode.NotFound)
+
+            val role = participant[ChatParticipants.role]
+            val userName = DatabaseFactory.dbQuery {
+                Users.selectAll().where { Users.id eq userId }.single()[Users.displayName]
             }
 
-            if (pinRow == null) {
-                call.respond(HttpStatusCode.NoContent)
-                return@get
+            // If owner, must provide newOwnerId
+            if (role == "owner") {
+                if (newOwnerId == null) return@post call.respond(HttpStatusCode.BadRequest, "Owner must specify newOwnerId")
+
+                DatabaseFactory.dbQuery {
+                    ChatParticipants.update({
+                        (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq newOwnerId)
+                    }) { it[ChatParticipants.role] = "owner" }
+                }
+
+                // Broadcast owner change
+                val ownerEvent = OwnerChangedEvent(chatId = chatId, newOwnerId = newOwnerId)
+                val ownerEnvelope = WsEnvelope(
+                    type = "owner_changed",
+                    payload = Json.encodeToString(OwnerChangedEvent.serializer(), ownerEvent)
+                )
+                launch { ConnectionManager.broadcastToChat(chatId, ownerEnvelope) }
+
+                // System message about new owner
+                val newOwnerName = DatabaseFactory.dbQuery {
+                    Users.selectAll().where { Users.id eq newOwnerId }.single()[Users.displayName]
+                }
+                val now2 = System.currentTimeMillis()
+                val sysId2 = CassandraFactory.insertSystemMessage(chatId, "$newOwnerName теперь администратор группы", now2)
+                broadcastSystemMessage(chatId, sysId2, "$newOwnerName теперь администратор группы", now2)
             }
 
-            val dto = buildPinnedMessageDto(
-                chatId,
-                pinRow[PinnedMessages.messageId],
-                pinRow[PinnedMessages.pinnedBy],
-                pinRow[PinnedMessages.pinnedAt]
+            // Remove participant
+            DatabaseFactory.dbQuery {
+                ChatParticipants.deleteWhere {
+                    (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq userId)
+                }
+            }
+
+            // System message
+            val now = System.currentTimeMillis()
+            val sysId = CassandraFactory.insertSystemMessage(chatId, "$userName покинул группу", now)
+            broadcastSystemMessage(chatId, sysId, "$userName покинул группу", now)
+
+            call.respond(HttpStatusCode.OK)
+        }
+
+        /** Delete a group (owner only) */
+        delete("/chats/{chatId}") {
+            val chatId = call.parameters["chatId"]?.toIntOrNull()
+                ?: return@delete call.respond(HttpStatusCode.BadRequest)
+            val params = call.receiveParameters()
+            val userId = params["userId"]?.toIntOrNull()
+                ?: return@delete call.respond(HttpStatusCode.BadRequest)
+
+            // Verify owner
+            val isOwner = DatabaseFactory.dbQuery {
+                ChatParticipants.selectAll()
+                    .where { (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq userId) and (ChatParticipants.role eq "owner") }
+                    .count() > 0
+            }
+            if (!isOwner) return@delete call.respond(HttpStatusCode.Forbidden)
+
+            // Broadcast removal to all members before deleting
+            val event = ChatRemovedEvent(chatId = chatId, reason = "group_deleted")
+            val envelope = WsEnvelope(
+                type = "chat_removed",
+                payload = Json.encodeToString(ChatRemovedEvent.serializer(), event)
             )
-            if (dto != null) call.respond(dto)
-            else call.respond(HttpStatusCode.NoContent)
+            launch { ConnectionManager.broadcastToChat(chatId, envelope) }
+
+            // Delete everything
+            CassandraFactory.deleteAllChatMessages(chatId)
+            DatabaseFactory.dbQuery {
+                PinnedMessages.deleteWhere { PinnedMessages.chatId eq chatId }
+                DeletedMessagesPerUser.deleteWhere { DeletedMessagesPerUser.chatId eq chatId }
+                ChatInvites.deleteWhere { ChatInvites.chatId eq chatId }
+                ChatParticipants.deleteWhere { ChatParticipants.chatId eq chatId }
+                Chats.deleteWhere { Chats.id eq chatId }
+            }
+
+            call.respond(HttpStatusCode.OK)
+        }
+
+        // ── Group members ────────────────────────────────────────────────────
+
+        /** Get members of a group chat */
+        get("/chats/{chatId}/members") {
+            val chatId = call.parameters["chatId"]?.toIntOrNull()
+                ?: return@get call.respond(HttpStatusCode.BadRequest)
+
+            val members = DatabaseFactory.dbQuery {
+                val participants = ChatParticipants.selectAll()
+                    .where { ChatParticipants.chatId eq chatId }
+                    .toList()
+
+                participants.map { p ->
+                    val uid = p[ChatParticipants.userId]
+                    val user = Users.selectAll().where { Users.id eq uid }.single()
+                    val online = RedisFactory.isOnline(uid)
+                    val lastSeen = if (!online) {
+                        RedisFactory.getLastSeen(uid) ?: user[Users.lastSeenAt]
+                    } else null
+
+                    MemberDto(
+                        id = uid,
+                        displayName = user[Users.displayName],
+                        role = p[ChatParticipants.role],
+                        online = online,
+                        lastSeen = lastSeen
+                    )
+                }
+            }
+            call.respond(members)
+        }
+
+        /** Kick a member from a group (owner only) */
+        post("/chats/{chatId}/kick") {
+            val chatId = call.parameters["chatId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val params = call.receiveParameters()
+            val userId = params["userId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val targetId = params["targetId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+
+            val isOwner = DatabaseFactory.dbQuery {
+                ChatParticipants.selectAll()
+                    .where { (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq userId) and (ChatParticipants.role eq "owner") }
+                    .count() > 0
+            }
+            if (!isOwner) return@post call.respond(HttpStatusCode.Forbidden)
+
+            val targetName = DatabaseFactory.dbQuery {
+                Users.selectAll().where { Users.id eq targetId }.singleOrNull()?.get(Users.displayName) ?: "Unknown"
+            }
+
+            DatabaseFactory.dbQuery {
+                ChatParticipants.deleteWhere {
+                    (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq targetId)
+                }
+            }
+
+            // System message
+            val now = System.currentTimeMillis()
+            val sysId = CassandraFactory.insertSystemMessage(chatId, "$targetName исключён из группы", now)
+            broadcastSystemMessage(chatId, sysId, "$targetName исключён из группы", now)
+
+            // Notify kicked user
+            val kickEvent = ChatRemovedEvent(chatId = chatId, reason = "kicked")
+            val kickEnvelope = WsEnvelope(
+                type = "chat_removed",
+                payload = Json.encodeToString(ChatRemovedEvent.serializer(), kickEvent)
+            )
+            ConnectionManager.connections[targetId]?.send(
+                io.ktor.websocket.Frame.Text(Json.encodeToString(WsEnvelope.serializer(), kickEnvelope))
+            )
+
+            call.respond(HttpStatusCode.OK)
+        }
+
+        /** Transfer group ownership */
+        post("/chats/{chatId}/transfer-owner") {
+            val chatId = call.parameters["chatId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val params = call.receiveParameters()
+            val userId = params["userId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val targetId = params["targetId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+
+            val isOwner = DatabaseFactory.dbQuery {
+                ChatParticipants.selectAll()
+                    .where { (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq userId) and (ChatParticipants.role eq "owner") }
+                    .count() > 0
+            }
+            if (!isOwner) return@post call.respond(HttpStatusCode.Forbidden)
+
+            DatabaseFactory.dbQuery {
+                ChatParticipants.update({
+                    (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq userId)
+                }) { it[role] = "member" }
+
+                ChatParticipants.update({
+                    (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq targetId)
+                }) { it[role] = "owner" }
+            }
+
+            val ownerEvent = OwnerChangedEvent(chatId = chatId, newOwnerId = targetId)
+            val envelope = WsEnvelope(
+                type = "owner_changed",
+                payload = Json.encodeToString(OwnerChangedEvent.serializer(), ownerEvent)
+            )
+            launch { ConnectionManager.broadcastToChat(chatId, envelope) }
+
+            // System message
+            val targetName = DatabaseFactory.dbQuery {
+                Users.selectAll().where { Users.id eq targetId }.single()[Users.displayName]
+            }
+            val now = System.currentTimeMillis()
+            val sysId = CassandraFactory.insertSystemMessage(chatId, "$targetName теперь администратор группы", now)
+            broadcastSystemMessage(chatId, sysId, "$targetName теперь администратор группы", now)
+
+            call.respond(HttpStatusCode.OK)
+        }
+
+        // ── User presence ────────────────────────────────────────────────────
+
+        /** Get presence info (online + lastSeen) for a list of user IDs */
+        get("/users/presence") {
+            val idsParam = call.request.queryParameters["ids"] ?: ""
+            val ids = idsParam.split(",").mapNotNull { it.trim().toIntOrNull() }
+            if (ids.isEmpty()) return@get call.respond(emptyMap<Int, UserPresenceDto>())
+
+            val result = DatabaseFactory.dbQuery {
+                ids.associateWith { uid ->
+                    val online = RedisFactory.isOnline(uid)
+                    val lastSeen = if (!online) {
+                        RedisFactory.getLastSeen(uid)
+                            ?: Users.selectAll().where { Users.id eq uid }
+                                .singleOrNull()?.get(Users.lastSeenAt)
+                    } else null
+                    UserPresenceDto(online = online, lastSeen = lastSeen)
+                }
+            }
+            call.respond(result)
         }
     }
 }
@@ -623,14 +992,14 @@ private fun findOrCreateDm(userA: Int, userB: Int): Int {
 }
 
 private fun getChatListForUser(userId: Int): List<ChatDto> {
-    val myChatIds = ChatParticipants.selectAll()
+    val myParticipations = ChatParticipants.selectAll()
         .where { ChatParticipants.userId eq userId }
-        .map { it[ChatParticipants.chatId] }
+        .map { it[ChatParticipants.chatId] to it[ChatParticipants.clearedAt] }
 
-    if (myChatIds.isEmpty()) return emptyList()
+    if (myParticipations.isEmpty()) return emptyList()
 
-    return myChatIds.map { cId ->
-        val chatRow = Chats.selectAll().where { Chats.id eq cId }.single()
+    return myParticipations.mapNotNull { (cId, clearedAt) ->
+        val chatRow = Chats.selectAll().where { Chats.id eq cId }.singleOrNull() ?: return@mapNotNull null
         val chatType = chatRow[Chats.type]
 
         var otherUserId: Int? = null
@@ -644,13 +1013,16 @@ private fun getChatListForUser(userId: Int): List<ChatDto> {
                 otherUserId = other[ChatParticipants.userId]
                 otherUserName = Users.selectAll()
                     .where { Users.id eq otherUserId!! }
-                    .single()[Users.displayName]
+                    .singleOrNull()?.get(Users.displayName)
             }
         }
 
         // Last message from Cassandra
         val lastMsg = CassandraFactory.getLastMessage(cId)?.let { msg ->
-            val senderName = Users.selectAll()
+            // If DM was cleared, skip messages before clearedAt
+            if (clearedAt != null && msg.timestamp <= clearedAt) return@let null
+            if (msg.isDeleted) return@let null
+            val senderName = if (msg.senderId == 0) "Система" else Users.selectAll()
                 .where { Users.id eq msg.senderId }
                 .singleOrNull()?.get(Users.displayName) ?: "Unknown"
             MessageDto(
@@ -660,9 +1032,13 @@ private fun getChatListForUser(userId: Int): List<ChatDto> {
                 senderName = senderName,
                 text = msg.text,
                 timestamp = msg.timestamp,
-                status = msg.status
+                status = msg.status,
+                messageType = msg.messageType
             )
         }
+
+        // If DM was cleared and no messages after clearedAt, hide the chat
+        if (clearedAt != null && lastMsg == null && chatType == "dm") return@mapNotNull null
 
         ChatDto(
             id = cId,
@@ -689,7 +1065,7 @@ private suspend fun buildPinnedMessageDto(
 ): PinnedMessageDto? {
     val uuid = try { UUID.fromString(messageId) } catch (_: Exception) { return null }
     val msg = CassandraFactory.getMessageById(chatId, uuid) ?: return null
-    val senderName = DatabaseFactory.dbQuery {
+    val senderName = if (msg.senderId == 0) "Система" else DatabaseFactory.dbQuery {
         Users.selectAll()
             .where { Users.id eq msg.senderId }
             .singleOrNull()?.get(Users.displayName) ?: "Unknown"
@@ -704,4 +1080,25 @@ private suspend fun buildPinnedMessageDto(
         pinnedBy = pinnedBy,
         pinnedAt = pinnedAt
     )
+}
+
+/**
+ * Broadcast a system message to all connected participants of a chat.
+ */
+private suspend fun broadcastSystemMessage(chatId: Int, messageId: UUID, text: String, timestamp: Long) {
+    val msgDto = MessageDto(
+        id = messageId.toString(),
+        chatId = chatId,
+        senderId = 0,
+        senderName = "Система",
+        text = text,
+        timestamp = timestamp,
+        status = "sent",
+        messageType = "system"
+    )
+    val envelope = WsEnvelope(
+        type = "message",
+        payload = Json.encodeToString(MessageDto.serializer(), msgDto)
+    )
+    ConnectionManager.broadcastToChat(chatId, envelope)
 }

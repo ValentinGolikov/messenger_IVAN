@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.ivan.main.ChatDto
 import com.example.ivan.main.NetworkClient
 import com.example.ivan.main.UserDto
+import com.example.ivan.main.UserPresenceDto
 import com.example.ivan.main.WsManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,10 +33,15 @@ class ChatsViewModel(private val userId: Int) : ViewModel() {
     private val _onlineStatuses = MutableStateFlow<Map<Int, Boolean>>(emptyMap())
     val onlineStatuses: StateFlow<Map<Int, Boolean>> = _onlineStatuses
 
+    /** Map of userId → lastSeen timestamp */
+    private val _lastSeenMap = MutableStateFlow<Map<Int, Long?>>(emptyMap())
+    val lastSeenMap: StateFlow<Map<Int, Long?>> = _lastSeenMap
+
     init {
         loadChats()
         loadContacts()
         collectPresenceUpdates()
+        collectChatRemoved()
     }
 
     fun loadChats() {
@@ -45,14 +51,15 @@ class ChatsViewModel(private val userId: Int) : ViewModel() {
                 val chats = NetworkClient.getChats(userId)
                 _uiState.value = ChatsUiState.Success(chats)
 
-                // Load online statuses for DM chat partners
+                // Load presence (online + lastSeen) for DM chat partners
                 val dmPartnerIds = chats
                     .filter { it.type == "dm" }
                     .mapNotNull { it.otherUserId }
                 if (dmPartnerIds.isNotEmpty()) {
                     try {
-                        val statuses = NetworkClient.getOnlineStatus(dmPartnerIds)
-                        _onlineStatuses.value = statuses
+                        val presenceMap = NetworkClient.getUserPresence(dmPartnerIds)
+                        _onlineStatuses.value = presenceMap.mapValues { it.value.online }
+                        _lastSeenMap.value = presenceMap.mapValues { it.value.lastSeen }
                     } catch (_: Exception) {}
                 }
             } catch (e: Exception) {
@@ -76,6 +83,23 @@ class ChatsViewModel(private val userId: Int) : ViewModel() {
         viewModelScope.launch {
             WsManager.presenceUpdates.collect { event ->
                 _onlineStatuses.value = _onlineStatuses.value + (event.userId to event.online)
+                if (!event.online && event.lastSeen != null) {
+                    _lastSeenMap.value = _lastSeenMap.value + (event.userId to event.lastSeen)
+                }
+            }
+        }
+    }
+
+    /** Collect chat removed events (DM deleted for both / group deleted / kicked) */
+    private fun collectChatRemoved() {
+        viewModelScope.launch {
+            WsManager.chatRemoved.collect { event ->
+                val current = _uiState.value
+                if (current is ChatsUiState.Success) {
+                    _uiState.value = ChatsUiState.Success(
+                        current.chats.filter { it.id != event.chatId }
+                    )
+                }
             }
         }
     }
@@ -132,6 +156,22 @@ class ChatsViewModel(private val userId: Int) : ViewModel() {
                 val resp = NetworkClient.createGroup(userId, title)
                 loadChats()
                 onReady(resp.chatId, resp.inviteToken)
+            } catch (e: Exception) { /* ignore */ }
+        }
+    }
+
+    /** Delete a DM chat */
+    fun deleteChat(chatId: Int, forAll: Boolean) {
+        viewModelScope.launch {
+            try {
+                NetworkClient.deleteChat(chatId, userId, forAll)
+                // Remove from local list
+                val current = _uiState.value
+                if (current is ChatsUiState.Success) {
+                    _uiState.value = ChatsUiState.Success(
+                        current.chats.filter { it.id != chatId }
+                    )
+                }
             } catch (e: Exception) { /* ignore */ }
         }
     }

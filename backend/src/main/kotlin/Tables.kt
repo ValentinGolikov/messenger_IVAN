@@ -9,6 +9,7 @@ object Users : Table("users") {
     val displayName = varchar("display_name", 50)
     val realName = varchar("real_name", 100).nullable()
     val email = varchar("email", 100).nullable()
+    val lastSeenAt = long("last_seen_at").nullable()
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -48,6 +49,7 @@ object ChatParticipants : Table("chat_participants") {
     val userId = integer("user_id").references(Users.id, onDelete = ReferenceOption.CASCADE)
     val role = varchar("role", 10).default("member") // "owner" | "member"
     val joinedAt = long("joined_at")
+    val clearedAt = long("cleared_at").nullable() // DM "delete for self": hide messages before this
     override val primaryKey = PrimaryKey(chatId, userId)
 }
 
@@ -79,4 +81,16 @@ object PinnedMessages : Table("pinned_messages") {
     val pinnedBy = integer("pinned_by").references(Users.id)
     val pinnedAt = long("pinned_at")
     override val primaryKey = PrimaryKey(chatId, messageId)
+}
+
+/**
+ * DeletedMessagesPerUser — per-user message deletion tracking.
+ * When a user deletes a message "for self", a row is inserted here.
+ * Messages in this table are filtered out when loading chat history for that user.
+ */
+object DeletedMessagesPerUser : Table("deleted_messages_per_user") {
+    val userId = integer("user_id").references(Users.id, onDelete = ReferenceOption.CASCADE)
+    val chatId = integer("chat_id").references(Chats.id, onDelete = ReferenceOption.CASCADE)
+    val messageId = varchar("message_id", 64)
+    override val primaryKey = PrimaryKey(userId, chatId, messageId)
 }

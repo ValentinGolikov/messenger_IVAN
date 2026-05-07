@@ -40,9 +40,17 @@ object CassandraFactory {
                 timestamp  bigint,
                 status     text,
                 is_deleted boolean,
+                message_type text,
                 PRIMARY KEY (chat_id, id)
             ) WITH CLUSTERING ORDER BY (id ASC)
         """.trimIndent())
+
+        // Idempotent migration: add message_type column if table existed before
+        try {
+            session.execute("ALTER TABLE messages ADD message_type text")
+        } catch (_: Exception) {
+            // Column already exists — ignore
+        }
     }
 
     /** Generate a new TimeUUID (v1) for a message */
@@ -52,8 +60,18 @@ object CassandraFactory {
     fun insertMessage(chatId: Int, senderId: Int, text: String, timestamp: Long, status: String = "sent"): UUID {
         val id = newTimeUuid()
         session.execute(
-            "INSERT INTO messages (chat_id, id, sender_id, text, timestamp, status, is_deleted) VALUES (?, ?, ?, ?, ?, ?, false)",
+            "INSERT INTO messages (chat_id, id, sender_id, text, timestamp, status, is_deleted, message_type) VALUES (?, ?, ?, ?, ?, ?, false, 'text')",
             chatId, id, senderId, text, timestamp, status
+        )
+        return id
+    }
+
+    /** Insert a system message (e.g. "User left the group"), returns the generated TimeUUID */
+    fun insertSystemMessage(chatId: Int, text: String, timestamp: Long): UUID {
+        val id = newTimeUuid()
+        session.execute(
+            "INSERT INTO messages (chat_id, id, sender_id, text, timestamp, status, is_deleted, message_type) VALUES (?, ?, 0, ?, ?, 'sent', false, 'system')",
+            chatId, id, text, timestamp
         )
         return id
     }
@@ -63,7 +81,7 @@ object CassandraFactory {
         // We want the last N messages sorted oldest-first.
         // Cassandra sorts ASC by default. To get the "last N" we reverse and re-reverse:
         val rs = session.execute(
-            "SELECT id, chat_id, sender_id, text, timestamp, status, is_deleted FROM messages WHERE chat_id = ? ORDER BY id DESC LIMIT ?",
+            "SELECT id, chat_id, sender_id, text, timestamp, status, is_deleted, message_type FROM messages WHERE chat_id = ? ORDER BY id DESC LIMIT ?",
             chatId, limit
         )
         return rs.map { row -> row.toCassandraMessage() }.reversed()
@@ -72,7 +90,7 @@ object CassandraFactory {
     /** Get the last message for a chat (for chat list preview) */
     fun getLastMessage(chatId: Int): CassandraMessage? {
         val rs = session.execute(
-            "SELECT id, chat_id, sender_id, text, timestamp, status, is_deleted FROM messages WHERE chat_id = ? ORDER BY id DESC LIMIT 1",
+            "SELECT id, chat_id, sender_id, text, timestamp, status, is_deleted, message_type FROM messages WHERE chat_id = ? ORDER BY id DESC LIMIT 1",
             chatId
         )
         return rs.firstOrNull()?.toCassandraMessage()
@@ -89,10 +107,26 @@ object CassandraFactory {
     /** Get a single message by chatId and messageId */
     fun getMessageById(chatId: Int, messageId: UUID): CassandraMessage? {
         val rs = session.execute(
-            "SELECT id, chat_id, sender_id, text, timestamp, status, is_deleted FROM messages WHERE chat_id = ? AND id = ?",
+            "SELECT id, chat_id, sender_id, text, timestamp, status, is_deleted, message_type FROM messages WHERE chat_id = ? AND id = ?",
             chatId, messageId
         )
         return rs.firstOrNull()?.toCassandraMessage()
+    }
+
+    /** Delete a message for all: set is_deleted=true and clear the text */
+    fun deleteMessageForAll(chatId: Int, messageId: UUID) {
+        session.execute(
+            "UPDATE messages SET is_deleted = true, text = '' WHERE chat_id = ? AND id = ?",
+            chatId, messageId
+        )
+    }
+
+    /** Delete all messages in a chat (physically removes rows) */
+    fun deleteAllChatMessages(chatId: Int) {
+        session.execute(
+            "DELETE FROM messages WHERE chat_id = ?",
+            chatId
+        )
     }
 
     /** Mark all messages up to (and including) lastMessageId as read, for a specific sender */
@@ -130,7 +164,8 @@ object CassandraFactory {
             text = getString("text") ?: "",
             timestamp = getLong("timestamp"),
             status = getString("status") ?: "sent",
-            isDeleted = getBoolean("is_deleted")
+            isDeleted = getBoolean("is_deleted"),
+            messageType = getString("message_type") ?: "text"
         )
     }
 }
@@ -142,5 +177,6 @@ data class CassandraMessage(
     val text: String,
     val timestamp: Long,
     val status: String,
-    val isDeleted: Boolean
+    val isDeleted: Boolean,
+    val messageType: String = "text" // "text" | "system"
 )

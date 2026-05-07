@@ -10,6 +10,7 @@ object RedisFactory {
 
     private const val ONLINE_TTL = 60L // seconds
     private const val ONLINE_PREFIX = "user:online:"
+    private const val LAST_SEEN_PREFIX = "user:last_seen:"
 
     fun init() {
         val host = System.getenv("REDIS_HOST") ?: "localhost"
@@ -45,6 +46,24 @@ object RedisFactory {
         val pipeline = client.connect().sync()
         return userIds.associateWith { id ->
             pipeline.exists("$ONLINE_PREFIX$id") > 0
+        }
+    }
+
+    /** Store last-seen timestamp (persistent, no TTL) */
+    fun setLastSeen(userId: Int, timestamp: Long) {
+        commands.set("$LAST_SEEN_PREFIX$userId", timestamp.toString())
+    }
+
+    /** Get last-seen timestamp for a single user */
+    fun getLastSeen(userId: Int): Long? {
+        return commands.get("$LAST_SEEN_PREFIX$userId")?.toLongOrNull()
+    }
+
+    /** Batch get last-seen timestamps */
+    fun getLastSeenBatch(userIds: List<Int>): Map<Int, Long?> {
+        if (userIds.isEmpty()) return emptyMap()
+        return userIds.associateWith { id ->
+            commands.get("$LAST_SEEN_PREFIX$id")?.toLongOrNull()
         }
     }
 

@@ -147,8 +147,15 @@ fun Application.configureSockets() {
             } finally {
                 heartbeatJob.cancel()
                 connections.remove(userId)
+                val lastSeenTs = System.currentTimeMillis()
                 RedisFactory.setOffline(userId)
-                broadcastPresence(connections, userId, online = false)
+                RedisFactory.setLastSeen(userId, lastSeenTs)
+                DatabaseFactory.dbQuery {
+                    Users.update({ Users.id eq userId }) {
+                        it[lastSeenAt] = lastSeenTs
+                    }
+                }
+                broadcastPresence(connections, userId, online = false, lastSeenTs = lastSeenTs)
             }
         }
     }
@@ -197,9 +204,10 @@ private suspend fun handleReadAck(
 private suspend fun broadcastPresence(
     connections: java.util.concurrent.ConcurrentHashMap<Int, DefaultWebSocketServerSession>,
     userId: Int,
-    online: Boolean
+    online: Boolean,
+    lastSeenTs: Long? = null
 ) {
-    val event = PresenceEvent(userId = userId, online = online)
+    val event = PresenceEvent(userId = userId, online = online, lastSeen = if (!online) lastSeenTs else null)
     val envelope = Json.encodeToString(
         WsEnvelope.serializer(),
         WsEnvelope(

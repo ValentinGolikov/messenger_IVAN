@@ -1,6 +1,8 @@
 package com.example.ivan.chats
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -23,11 +25,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ivan.R
 import com.example.ivan.main.ChatDto
 import com.example.ivan.main.UserDto
+import com.example.ivan.chat.formatLastSeen
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ChatsScreen(
     userId: Int,
@@ -37,10 +40,12 @@ fun ChatsScreen(
     val uiState by vm.uiState.collectAsState()
     val searchResults by vm.searchResults.collectAsState()
     val onlineStatuses by vm.onlineStatuses.collectAsState()
+    val lastSeenMap by vm.lastSeenMap.collectAsState()
 
     var showNewChatSheet by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var showSearch by remember { mutableStateOf(false) }
+    var deleteChatTarget by remember { mutableStateOf<ChatDto?>(null) }
 
     Scaffold(
         topBar = {
@@ -143,13 +148,18 @@ fun ChatsScreen(
                             LazyColumn(modifier = Modifier.fillMaxSize()) {
                                 items(s.chats, key = { it.id }) { chat ->
                                     val isOnline = chat.otherUserId?.let { onlineStatuses[it] } ?: false
+                                    val lastSeen = chat.otherUserId?.let { lastSeenMap[it] }
                                     ChatListItem(
                                         chat = chat,
                                         currentUserId = userId,
                                         isOtherOnline = isOnline,
+                                        otherLastSeen = lastSeen,
                                         onClick = {
                                             val title = chatTitle(chat)
                                             onOpenChat(chat.id, title, chat.type, chat.otherUserId)
+                                        },
+                                        onLongClick = {
+                                            deleteChatTarget = chat
                                         }
                                     )
                                     HorizontalDivider(modifier = Modifier.padding(start = 72.dp))
@@ -159,6 +169,40 @@ fun ChatsScreen(
                     }
                 }
             }
+        }
+    }
+
+    // Delete chat dialog
+    deleteChatTarget?.let { chat ->
+        var forAll by remember { mutableStateOf(false) }
+        if (chat.type == "dm") {
+            AlertDialog(
+                onDismissRequest = { deleteChatTarget = null },
+                title = { Text("Удалить чат") },
+                text = {
+                    Column {
+                        Text("Удалить этот чат?")
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = forAll, onCheckedChange = { forAll = it })
+                            Text("Также у собеседника",
+                                modifier = Modifier.clickable { forAll = !forAll })
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        vm.deleteChat(chat.id, forAll)
+                        deleteChatTarget = null
+                    }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { deleteChatTarget = null }) { Text("Отмена") }
+                }
+            )
+        } else {
+            // Group — just dismiss, actions are in the chat screen menu
+            deleteChatTarget = null
         }
     }
 
@@ -175,12 +219,15 @@ fun ChatsScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ChatListItem(
     chat: ChatDto,
     currentUserId: Int,
     isOtherOnline: Boolean,
-    onClick: () -> Unit
+    otherLastSeen: Long? = null,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit = {}
 ) {
     val title = chatTitle(chat)
     val lastText = chat.lastMessage?.text ?: "Нет сообщений"
@@ -191,7 +238,7 @@ private fun ChatListItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -284,6 +331,17 @@ private fun ChatListItem(
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            }
+            // Last seen for DM chats (when offline)
+            if (chat.type == "dm" && !isOtherOnline && otherLastSeen != null) {
+                val statusText = formatLastSeen(otherLastSeen)
+                if (statusText != "в сети") {
+                    Text(
+                        text = statusText,
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    )
+                }
             }
         }
 

@@ -79,7 +79,8 @@ data class MessageDto(
     val senderName: String,
     val text: String,
     val timestamp: Long,
-    val status: String = "sent" // "sent" | "delivered" | "read"
+    val status: String = "sent", // "sent" | "delivered" | "read"
+    val messageType: String = "text" // "text" | "system"
 )
 
 // ── Contacts ──────────────────────────────────────────────────────────────────
@@ -120,7 +121,9 @@ data class JoinByInviteResponse(
  * Generic envelope sent over the WebSocket so the client can distinguish
  * message types without a separate connection per feature.
  *
- * type: "message" | "chat_created" | "user_added" | "status_update" | "presence" | "read_ack" | "pin_update"
+ * type: "message" | "chat_created" | "user_added" | "status_update"
+ *     | "presence" | "read_ack" | "pin_update"
+ *     | "message_deleted" | "chat_removed" | "owner_changed"
  */
 @Serializable
 data class WsEnvelope(
@@ -140,7 +143,8 @@ data class StatusUpdateEvent(
 @Serializable
 data class PresenceEvent(
     val userId: Int,
-    val online: Boolean
+    val online: Boolean,
+    val lastSeen: Long? = null // timestamp when user went offline, null if online
 )
 
 /** Client → server: "I read messages up to this ID" */
@@ -152,7 +156,7 @@ data class ReadAckRequest(
 
 // ── Pinned messages ───────────────────────────────────────────────────────────
 
-/** Returned by GET /chats/{chatId}/pin and included in pin_update WS event */
+/** Returned by GET /chats/{chatId}/pins and included in pin_update WS event */
 @Serializable
 data class PinnedMessageDto(
     val messageId: String,
@@ -169,5 +173,50 @@ data class PinnedMessageDto(
 @Serializable
 data class PinEvent(
     val chatId: Int,
-    val pinnedMessage: PinnedMessageDto? // null = unpinned
+    val pinnedMessage: PinnedMessageDto?, // null when action = "unpin"
+    val action: String = "pin" // "pin" | "unpin"
+)
+
+// ── Presence ──────────────────────────────────────────────────────────────────
+
+/** Returned by GET /users/presence */
+@Serializable
+data class UserPresenceDto(
+    val online: Boolean,
+    val lastSeen: Long? = null
+)
+
+// ── Group members ─────────────────────────────────────────────────────────────
+
+/** Returned by GET /chats/{chatId}/members */
+@Serializable
+data class MemberDto(
+    val id: Int,
+    val displayName: String,
+    val role: String, // "owner" | "member"
+    val online: Boolean,
+    val lastSeen: Long? = null
+)
+
+// ── Deletion / leave events ───────────────────────────────────────────────────
+
+/** WS event: a message was deleted for all participants */
+@Serializable
+data class MessageDeletedEvent(
+    val chatId: Int,
+    val messageId: String
+)
+
+/** WS event: chat removed (DM deleted for both / group deleted / user kicked) */
+@Serializable
+data class ChatRemovedEvent(
+    val chatId: Int,
+    val reason: String // "deleted" | "kicked" | "group_deleted"
+)
+
+/** WS event: group ownership transferred */
+@Serializable
+data class OwnerChangedEvent(
+    val chatId: Int,
+    val newOwnerId: Int
 )

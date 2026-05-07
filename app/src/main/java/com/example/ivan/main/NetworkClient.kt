@@ -61,7 +61,8 @@ data class MessageDto(
     val senderName: String,
     val text: String,
     val timestamp: Long,
-    val status: String = "sent" // "sent" | "delivered" | "read"
+    val status: String = "sent", // "sent" | "delivered" | "read"
+    val messageType: String = "text" // "text" | "system"
 )
 
 @Serializable
@@ -129,7 +130,8 @@ data class StatusUpdateEvent(
 @Serializable
 data class PresenceEvent(
     val userId: Int,
-    val online: Boolean
+    val online: Boolean,
+    val lastSeen: Long? = null
 )
 
 /** Client → server: "I read messages up to this ID" */
@@ -141,7 +143,6 @@ data class ReadAckRequest(
 
 // ── Pinned messages ───────────────────────────────────────────────────────────
 
-/** Pinned message info returned by backend */
 @Serializable
 data class PinnedMessageDto(
     val messageId: String,
@@ -154,11 +155,50 @@ data class PinnedMessageDto(
     val pinnedAt: Long
 )
 
-/** WebSocket event: a message was pinned or unpinned */
 @Serializable
 data class PinEvent(
     val chatId: Int,
-    val pinnedMessage: PinnedMessageDto? // null = unpinned
+    val pinnedMessage: PinnedMessageDto?,
+    val action: String = "pin" // "pin" | "unpin"
+)
+
+// ── Presence ──────────────────────────────────────────────────────────────────
+
+@Serializable
+data class UserPresenceDto(
+    val online: Boolean,
+    val lastSeen: Long? = null
+)
+
+// ── Group members ─────────────────────────────────────────────────────────────
+
+@Serializable
+data class MemberDto(
+    val id: Int,
+    val displayName: String,
+    val role: String, // "owner" | "member"
+    val online: Boolean,
+    val lastSeen: Long? = null
+)
+
+// ── Deletion / leave events ───────────────────────────────────────────────────
+
+@Serializable
+data class MessageDeletedEvent(
+    val chatId: Int,
+    val messageId: String
+)
+
+@Serializable
+data class ChatRemovedEvent(
+    val chatId: Int,
+    val reason: String // "deleted" | "kicked" | "group_deleted"
+)
+
+@Serializable
+data class OwnerChangedEvent(
+    val chatId: Int,
+    val newOwnerId: Int
 )
 
 // ── HTTP client singleton ─────────────────────────────────────────────────────
@@ -229,8 +269,10 @@ object NetworkClient {
         return resp["chatId"]!!
     }
 
-    suspend fun getChatMessages(chatId: Int): List<MessageDto> =
-        httpClient.get(buildUrl("/chats/$chatId/messages")).body()
+    suspend fun getChatMessages(chatId: Int, userId: Int? = null): List<MessageDto> =
+        httpClient.get(buildUrl("/chats/$chatId/messages")) {
+            userId?.let { parameter("userId", it) }
+        }.body()
 
     // ── Read status ───────────────────────────────────────────────────────────
 
@@ -248,6 +290,15 @@ object NetworkClient {
     suspend fun getOnlineStatus(userIds: List<Int>): Map<Int, Boolean> {
         if (userIds.isEmpty()) return emptyMap()
         return httpClient.get(buildUrl("/users/online")) {
+            parameter("ids", userIds.joinToString(","))
+        }.body()
+    }
+
+    // ── Presence (online + lastSeen) ──────────────────────────────────────────
+
+    suspend fun getUserPresence(userIds: List<Int>): Map<Int, UserPresenceDto> {
+        if (userIds.isEmpty()) return emptyMap()
+        return httpClient.get(buildUrl("/users/presence")) {
             parameter("ids", userIds.joinToString(","))
         }.body()
     }
@@ -300,9 +351,70 @@ object NetworkClient {
         }
     }
 
-    suspend fun getPinnedMessage(chatId: Int): PinnedMessageDto? {
-        val response = httpClient.get(buildUrl("/chats/$chatId/pin"))
-        return if (response.status.value == 204) null
-        else response.body()
+    suspend fun getPinnedMessages(chatId: Int): List<PinnedMessageDto> =
+        httpClient.get(buildUrl("/chats/$chatId/pins")).body()
+
+    // ── Message deletion ──────────────────────────────────────────────────────
+
+    suspend fun deleteMessage(chatId: Int, messageId: String, userId: Int, forAll: Boolean) {
+        httpClient.post(buildUrl("/chats/$chatId/messages/$messageId/delete")) {
+            setBody(FormDataContent(Parameters.build {
+                append("userId", userId.toString())
+                append("forAll", forAll.toString())
+            }))
+        }
+    }
+
+    // ── Chat deletion ─────────────────────────────────────────────────────────
+
+    suspend fun deleteChat(chatId: Int, userId: Int, forAll: Boolean) {
+        httpClient.post(buildUrl("/chats/$chatId/delete")) {
+            setBody(FormDataContent(Parameters.build {
+                append("userId", userId.toString())
+                append("forAll", forAll.toString())
+            }))
+        }
+    }
+
+    // ── Leave / delete group ──────────────────────────────────────────────────
+
+    suspend fun leaveGroup(chatId: Int, userId: Int, newOwnerId: Int? = null) {
+        httpClient.post(buildUrl("/chats/$chatId/leave")) {
+            setBody(FormDataContent(Parameters.build {
+                append("userId", userId.toString())
+                newOwnerId?.let { append("newOwnerId", it.toString()) }
+            }))
+        }
+    }
+
+    suspend fun deleteGroup(chatId: Int, userId: Int) {
+        httpClient.delete(buildUrl("/chats/$chatId")) {
+            setBody(FormDataContent(Parameters.build {
+                append("userId", userId.toString())
+            }))
+        }
+    }
+
+    // ── Group members ─────────────────────────────────────────────────────────
+
+    suspend fun getMembers(chatId: Int): List<MemberDto> =
+        httpClient.get(buildUrl("/chats/$chatId/members")).body()
+
+    suspend fun kickMember(chatId: Int, userId: Int, targetId: Int) {
+        httpClient.post(buildUrl("/chats/$chatId/kick")) {
+            setBody(FormDataContent(Parameters.build {
+                append("userId", userId.toString())
+                append("targetId", targetId.toString())
+            }))
+        }
+    }
+
+    suspend fun transferOwner(chatId: Int, userId: Int, targetId: Int) {
+        httpClient.post(buildUrl("/chats/$chatId/transfer-owner")) {
+            setBody(FormDataContent(Parameters.build {
+                append("userId", userId.toString())
+                append("targetId", targetId.toString())
+            }))
+        }
     }
 }

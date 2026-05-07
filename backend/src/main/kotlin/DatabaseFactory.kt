@@ -24,7 +24,8 @@ object DatabaseFactory {
                 Chats,
                 ChatParticipants,
                 ChatInvites,
-                PinnedMessages
+                PinnedMessages,
+                DeletedMessagesPerUser
             )
         }
     }

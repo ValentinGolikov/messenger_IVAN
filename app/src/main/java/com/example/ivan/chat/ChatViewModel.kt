@@ -5,12 +5,14 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.ivan.BuildConfig
 import com.example.ivan.main.ChatMessage
+import com.example.ivan.main.MemberDto
 import com.example.ivan.main.MessageDto
 import com.example.ivan.main.NetworkClient
 import com.example.ivan.main.PinEvent
 import com.example.ivan.main.PinnedMessageDto
 import com.example.ivan.main.PresenceEvent
 import com.example.ivan.main.UserDto
+import com.example.ivan.main.UserPresenceDto
 import com.example.ivan.main.WsEnvelope
 import com.example.ivan.main.WsManager
 import io.ktor.client.plugins.websocket.webSocket
@@ -39,9 +41,21 @@ class ChatViewModel(
     private val _otherUserOnline = MutableStateFlow(false)
     val otherUserOnline: StateFlow<Boolean> = _otherUserOnline
 
-    /** Currently pinned message (null = nothing pinned) */
-    private val _pinnedMessage = MutableStateFlow<PinnedMessageDto?>(null)
-    val pinnedMessage: StateFlow<PinnedMessageDto?> = _pinnedMessage
+    /** Last seen timestamp for the other user in DM */
+    private val _otherUserLastSeen = MutableStateFlow<Long?>(null)
+    val otherUserLastSeen: StateFlow<Long?> = _otherUserLastSeen
+
+    /** All pinned messages (sorted by pinnedAt DESC) */
+    private val _pinnedMessages = MutableStateFlow<List<PinnedMessageDto>>(emptyList())
+    val pinnedMessages: StateFlow<List<PinnedMessageDto>> = _pinnedMessages
+
+    /** Group members list */
+    private val _members = MutableStateFlow<List<MemberDto>>(emptyList())
+    val members: StateFlow<List<MemberDto>> = _members
+
+    /** Current user's role in this chat */
+    private val _myRole = MutableStateFlow("member")
+    val myRole: StateFlow<String> = _myRole
 
     /** ID of the other user in DM */
     var otherUserId: Int? = null
@@ -51,17 +65,18 @@ class ChatViewModel(
 
     init {
         loadHistory()
-        loadPinnedMessage()
+        loadPinnedMessages()
         connectWebSocket()
         collectStatusUpdates()
         collectPresenceUpdates()
         collectPinUpdates()
+        collectMessageDeleted()
     }
 
     private fun loadHistory() {
         viewModelScope.launch {
             try {
-                val msgs = NetworkClient.getChatMessages(chatId)
+                val msgs = NetworkClient.getChatMessages(chatId, userId)
                 _messages.value = msgs
 
                 // Send read ack for the last message from other users
@@ -75,12 +90,24 @@ class ChatViewModel(
         }
     }
 
-    private fun loadPinnedMessage() {
+    private fun loadPinnedMessages() {
         viewModelScope.launch {
             try {
-                _pinnedMessage.value = NetworkClient.getPinnedMessage(chatId)
+                _pinnedMessages.value = NetworkClient.getPinnedMessages(chatId)
             } catch (e: Exception) {
                 // non-critical
+            }
+        }
+    }
+
+    fun loadMembers() {
+        viewModelScope.launch {
+            try {
+                val memberList = NetworkClient.getMembers(chatId)
+                _members.value = memberList
+                _myRole.value = memberList.find { it.id == userId }?.role ?: "member"
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
     }
@@ -139,6 +166,9 @@ class ChatViewModel(
             WsManager.presenceUpdates.collect { event ->
                 if (event.userId == otherUserId) {
                     _otherUserOnline.value = event.online
+                    if (!event.online && event.lastSeen != null) {
+                        _otherUserLastSeen.value = event.lastSeen
+                    }
                 }
             }
         }
@@ -149,20 +179,47 @@ class ChatViewModel(
         viewModelScope.launch {
             WsManager.pinUpdates.collect { event ->
                 if (event.chatId == chatId) {
-                    _pinnedMessage.value = event.pinnedMessage
+                    when (event.action) {
+                        "pin" -> {
+                            event.pinnedMessage?.let { pinned ->
+                                // Add to list (remove if already present, then prepend)
+                                _pinnedMessages.value = listOf(pinned) +
+                                    _pinnedMessages.value.filter { it.messageId != pinned.messageId }
+                            }
+                        }
+                        "unpin" -> {
+                            val msgId = event.pinnedMessage?.messageId
+                            if (msgId != null) {
+                                _pinnedMessages.value = _pinnedMessages.value.filter { it.messageId != msgId }
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 
-    /** Set the other user ID (for DM chats) and load their online status */
+    /** Collect message deleted events */
+    private fun collectMessageDeleted() {
+        viewModelScope.launch {
+            WsManager.messageDeleted.collect { event ->
+                if (event.chatId == chatId) {
+                    _messages.value = _messages.value.filter { it.id != event.messageId }
+                }
+            }
+        }
+    }
+
+    /** Set the other user ID (for DM chats) and load their online status + lastSeen */
     fun setOtherUser(otherId: Int?) {
         otherUserId = otherId
         if (otherId != null) {
             viewModelScope.launch {
                 try {
-                    val statuses = NetworkClient.getOnlineStatus(listOf(otherId))
-                    _otherUserOnline.value = statuses[otherId] == true
+                    val presenceMap = NetworkClient.getUserPresence(listOf(otherId))
+                    val presence = presenceMap[otherId]
+                    _otherUserOnline.value = presence?.online == true
+                    _otherUserLastSeen.value = presence?.lastSeen
                 } catch (e: Exception) {
                     // ignore
                 }
@@ -184,24 +241,88 @@ class ChatViewModel(
         }
     }
 
-    /** Pin a message */
-    fun pinMessage(messageId: String) {
+    /** Delete a message */
+    fun deleteMessage(messageId: String, forAll: Boolean) {
         viewModelScope.launch {
             try {
-                val pinned = NetworkClient.pinMessage(chatId, userId, messageId)
-                _pinnedMessage.value = pinned
+                NetworkClient.deleteMessage(chatId, messageId, userId, forAll)
+                if (!forAll) {
+                    // Remove locally for "delete for self"
+                    _messages.value = _messages.value.filter { it.id != messageId }
+                }
+                // "for all" will be handled by WS event
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
     }
 
-    /** Unpin the currently pinned message */
+    /** Pin a message */
+    fun pinMessage(messageId: String) {
+        viewModelScope.launch {
+            try {
+                val pinned = NetworkClient.pinMessage(chatId, userId, messageId)
+                // WS event will update the list
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    /** Unpin a specific message */
     fun unpinMessage(messageId: String) {
         viewModelScope.launch {
             try {
                 NetworkClient.unpinMessage(chatId, userId, messageId)
-                _pinnedMessage.value = null
+                // WS event will update the list
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    /** Leave group */
+    fun leaveGroup(newOwnerId: Int? = null, onDone: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                NetworkClient.leaveGroup(chatId, userId, newOwnerId)
+                onDone()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    /** Delete group (owner only) */
+    fun deleteGroup(onDone: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                NetworkClient.deleteGroup(chatId, userId)
+                onDone()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    /** Kick a member */
+    fun kickMember(targetId: Int) {
+        viewModelScope.launch {
+            try {
+                NetworkClient.kickMember(chatId, userId, targetId)
+                loadMembers()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    /** Transfer ownership */
+    fun transferOwner(targetId: Int) {
+        viewModelScope.launch {
+            try {
+                NetworkClient.transferOwner(chatId, userId, targetId)
+                loadMembers()
             } catch (e: Exception) {
                 e.printStackTrace()
             }

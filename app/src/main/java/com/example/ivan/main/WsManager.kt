@@ -39,6 +39,18 @@ object WsManager {
     private val _pinUpdates = MutableSharedFlow<PinEvent>(extraBufferCapacity = 64)
     val pinUpdates: SharedFlow<PinEvent> = _pinUpdates.asSharedFlow()
 
+    // Message deleted (for all)
+    private val _messageDeleted = MutableSharedFlow<MessageDeletedEvent>(extraBufferCapacity = 64)
+    val messageDeleted: SharedFlow<MessageDeletedEvent> = _messageDeleted.asSharedFlow()
+
+    // Chat removed (deleted / kicked / group_deleted)
+    private val _chatRemoved = MutableSharedFlow<ChatRemovedEvent>(extraBufferCapacity = 64)
+    val chatRemoved: SharedFlow<ChatRemovedEvent> = _chatRemoved.asSharedFlow()
+
+    // Owner changed
+    private val _ownerChanged = MutableSharedFlow<OwnerChangedEvent>(extraBufferCapacity = 64)
+    val ownerChanged: SharedFlow<OwnerChangedEvent> = _ownerChanged.asSharedFlow()
+
     // Текущая сессия — нужна для отправки сообщений
     private var session: io.ktor.client.plugins.websocket.ClientWebSocketSession? = null
 
@@ -84,6 +96,24 @@ object WsManager {
                                             Json.decodeFromString<PinEvent>(envelope.payload)
                                         }.getOrNull() ?: continue
                                         _pinUpdates.emit(event)
+                                    }
+                                    "message_deleted" -> {
+                                        val event = runCatching {
+                                            Json.decodeFromString<MessageDeletedEvent>(envelope.payload)
+                                        }.getOrNull() ?: continue
+                                        _messageDeleted.emit(event)
+                                    }
+                                    "chat_removed" -> {
+                                        val event = runCatching {
+                                            Json.decodeFromString<ChatRemovedEvent>(envelope.payload)
+                                        }.getOrNull() ?: continue
+                                        _chatRemoved.emit(event)
+                                    }
+                                    "owner_changed" -> {
+                                        val event = runCatching {
+                                            Json.decodeFromString<OwnerChangedEvent>(envelope.payload)
+                                        }.getOrNull() ?: continue
+                                        _ownerChanged.emit(event)
                                     }
                                 }
                             }
