@@ -61,12 +61,10 @@ class ChatViewModel(
     var otherUserId: Int? = null
         private set
 
-    private var wsSession: io.ktor.client.plugins.websocket.ClientWebSocketSession? = null
-
     init {
         loadHistory()
         loadPinnedMessages()
-        connectWebSocket()
+        collectIncomingMessages()
         collectStatusUpdates()
         collectPresenceUpdates()
         collectPinUpdates()
@@ -112,35 +110,21 @@ class ChatViewModel(
         }
     }
 
-    private fun connectWebSocket() {
+    private fun collectIncomingMessages() {
         viewModelScope.launch {
-            try {
-                NetworkClient.httpClient.webSocket(
-                    "ws://${BuildConfig.SERVER_URL}/chat/$userId"
-                ) {
-                    wsSession = this
-                    for (frame in incoming) {
-                        if (frame is Frame.Text) {
-                            val envelope = Json.decodeFromString<WsEnvelope>(frame.readText())
-                            when (envelope.type) {
-                                "message" -> {
-                                    val msg = Json.decodeFromString<MessageDto>(envelope.payload)
-                                    // Only append if it belongs to this chat
-                                    if (msg.chatId == chatId) {
-                                        _messages.value = _messages.value + msg
-
-                                        // If message is from someone else, send read ack immediately
-                                        if (msg.senderId != userId && msg.id.isNotEmpty()) {
-                                            WsManager.sendReadAck(chatId, msg.id)
-                                        }
-                                    }
-                                }
-                            }
+            WsManager.incoming.collect { msg ->
+                // Only append if it belongs to this chat
+                if (msg.chatId == chatId) {
+                    // Check if message is already in list (could happen if loadHistory returns it right as WS sends it)
+                    val exists = _messages.value.any { it.id == msg.id }
+                    if (!exists) {
+                        _messages.value = _messages.value + msg
+                        // If message is from someone else, send read ack immediately
+                        if (msg.senderId != userId && msg.id.isNotEmpty()) {
+                            WsManager.sendReadAck(chatId, msg.id)
                         }
                     }
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
             }
         }
     }
@@ -232,9 +216,7 @@ class ChatViewModel(
         viewModelScope.launch {
             try {
                 val msg = ChatMessage(chatId = chatId, text = text)
-                wsSession?.send(
-                    Frame.Text(Json.encodeToString(ChatMessage.serializer(), msg))
-                )
+                WsManager.send(Frame.Text(Json.encodeToString(ChatMessage.serializer(), msg)))
             } catch (e: Exception) {
                 e.printStackTrace()
             }

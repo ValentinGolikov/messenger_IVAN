@@ -178,6 +178,7 @@ class MainActivity : ComponentActivity() {
             val loginResponse = NetworkClient.login(token)
             // ✅ FIX: authState is set BEFORE navigation happens (which reacts to authState).
             authState.value = loginResponse.userId
+            WsManager.connect(loginResponse.userId)
             Log.d("IVAN", "Logged in: ${loginResponse.yandexData.displayName}, id=${loginResponse.userId}")
             true
         } catch (e: Exception) {
