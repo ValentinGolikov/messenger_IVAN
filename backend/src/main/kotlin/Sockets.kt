@@ -4,8 +4,10 @@ import io.ktor.server.application.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
+import kotlinx.coroutines.*
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.*
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -14,8 +16,14 @@ import java.util.concurrent.ConcurrentHashMap
  * Single connection per user. Messages are dispatched to all participants
  * of the target chat.
  *
- * Client sends:  ChatMessage  { chatId, text, timestamp }
- * Server pushes: WsEnvelope   { type: "message", payload: <MessageDto JSON> }
+ * Client sends:
+ *   ChatMessage   { chatId, text, timestamp }
+ *   ReadAckRequest (wrapped in WsEnvelope with type="read_ack")
+ *
+ * Server pushes:
+ *   WsEnvelope { type: "message",       payload: <MessageDto JSON> }
+ *   WsEnvelope { type: "status_update", payload: <StatusUpdateEvent JSON> }
+ *   WsEnvelope { type: "presence",      payload: <PresenceEvent JSON> }
  */
 fun Application.configureSockets() {
     // userId → active WebSocket session
@@ -26,11 +34,37 @@ fun Application.configureSockets() {
             val userId = call.parameters["userId"]?.toInt() ?: return@webSocket
             connections[userId] = this
 
+            // ── Online: mark in Redis and notify contacts ──
+            RedisFactory.setOnline(userId)
+            broadcastPresence(connections, userId, online = true)
+
+            // Heartbeat coroutine: refresh Redis TTL every 30s
+            val heartbeatJob = launch {
+                while (isActive) {
+                    delay(30_000)
+                    RedisFactory.heartbeat(userId)
+                }
+            }
+
             try {
                 for (frame in incoming) {
                     if (frame is Frame.Text) {
                         val text = frame.readText()
-                        val message = Json.decodeFromString<ChatMessage>(text)
+
+                        // Try to parse as WsEnvelope first (for read_ack and other typed messages)
+                        val envelope = runCatching {
+                            Json.decodeFromString<WsEnvelope>(text)
+                        }.getOrNull()
+
+                        if (envelope != null && envelope.type == "read_ack") {
+                            handleReadAck(envelope.payload, userId, connections)
+                            continue
+                        }
+
+                        // Otherwise treat as ChatMessage
+                        val message = runCatching {
+                            Json.decodeFromString<ChatMessage>(text)
+                        }.getOrNull() ?: continue
 
                         // Verify user is a participant of the chat
                         val isMember = DatabaseFactory.dbQuery {
@@ -42,32 +76,33 @@ fun Application.configureSockets() {
                         }
                         if (!isMember) continue
 
-                        // Persist and fetch sender name
-                        val (msgId, senderName) = DatabaseFactory.dbQuery {
-                            val insertedId = Messages.insert {
-                                it[chatId] = message.chatId
-                                it[senderId] = userId
-                                it[Messages.text] = message.text
-                                it[timestamp] = message.timestamp
-                            }[Messages.id]
+                        // Persist in Cassandra
+                        val msgId = CassandraFactory.insertMessage(
+                            chatId = message.chatId,
+                            senderId = userId,
+                            text = message.text,
+                            timestamp = message.timestamp,
+                            status = "sent"
+                        )
 
-                            val name = Users.selectAll()
+                        // Fetch sender name
+                        val senderName = DatabaseFactory.dbQuery {
+                            Users.selectAll()
                                 .where { Users.id eq userId }
                                 .single()[Users.displayName]
-
-                            Pair(insertedId, name)
                         }
 
                         val msgDto = MessageDto(
-                            id = msgId,
+                            id = msgId.toString(),
                             chatId = message.chatId,
                             senderId = userId,
                             senderName = senderName,
                             text = message.text,
-                            timestamp = message.timestamp
+                            timestamp = message.timestamp,
+                            status = "sent"
                         )
 
-                        val envelope = Json.encodeToString(
+                        val msgEnvelope = Json.encodeToString(
                             WsEnvelope.serializer(),
                             WsEnvelope(
                                 type = "message",
@@ -83,13 +118,112 @@ fun Application.configureSockets() {
                         }
 
                         participantIds.forEach { pid ->
-                            connections[pid]?.send(Frame.Text(envelope))
+                            val session = connections[pid]
+                            if (session != null) {
+                                session.send(Frame.Text(msgEnvelope))
+
+                                // If recipient (not sender) received it → mark as delivered
+                                if (pid != userId) {
+                                    CassandraFactory.updateMessageStatus(message.chatId, msgId, "delivered")
+
+                                    // Notify the sender about delivery
+                                    val statusEvent = StatusUpdateEvent(
+                                        messageId = msgId.toString(),
+                                        chatId = message.chatId,
+                                        status = "delivered"
+                                    )
+                                    val statusEnvelope = Json.encodeToString(
+                                        WsEnvelope.serializer(),
+                                        WsEnvelope(
+                                            type = "status_update",
+                                            payload = Json.encodeToString(StatusUpdateEvent.serializer(), statusEvent)
+                                        )
+                                    )
+                                    connections[userId]?.send(Frame.Text(statusEnvelope))
+                                }
+                            }
                         }
                     }
                 }
             } finally {
+                heartbeatJob.cancel()
                 connections.remove(userId)
+                RedisFactory.setOffline(userId)
+                broadcastPresence(connections, userId, online = false)
             }
         }
+    }
+}
+
+/**
+ * Handle a read_ack from a client: mark messages as read in Cassandra
+ * and notify the original senders.
+ */
+private suspend fun handleReadAck(
+    payload: String,
+    readerUserId: Int,
+    connections: ConcurrentHashMap<Int, DefaultWebSocketServerSession>
+) {
+    val ack = runCatching {
+        Json.decodeFromString<ReadAckRequest>(payload)
+    }.getOrNull() ?: return
+
+    val lastMsgUuid = runCatching { UUID.fromString(ack.lastMessageId) }.getOrNull() ?: return
+
+    // Mark messages as read in Cassandra and get (messageId, senderId) pairs
+    val updated = CassandraFactory.markMessagesAsRead(ack.chatId, lastMsgUuid, readerUserId)
+
+    // Notify each sender that their message was read
+    for ((messageId, senderId) in updated) {
+        val statusEvent = StatusUpdateEvent(
+            messageId = messageId.toString(),
+            chatId = ack.chatId,
+            status = "read"
+        )
+        val envelope = Json.encodeToString(
+            WsEnvelope.serializer(),
+            WsEnvelope(
+                type = "status_update",
+                payload = Json.encodeToString(StatusUpdateEvent.serializer(), statusEvent)
+            )
+        )
+        connections[senderId]?.send(Frame.Text(envelope))
+    }
+}
+
+/**
+ * Broadcast presence (online/offline) to all contacts of the user
+ * who are currently connected.
+ */
+private suspend fun broadcastPresence(
+    connections: ConcurrentHashMap<Int, DefaultWebSocketServerSession>,
+    userId: Int,
+    online: Boolean
+) {
+    val event = PresenceEvent(userId = userId, online = online)
+    val envelope = Json.encodeToString(
+        WsEnvelope.serializer(),
+        WsEnvelope(
+            type = "presence",
+            payload = Json.encodeToString(PresenceEvent.serializer(), event)
+        )
+    )
+
+    // Get all chat participants who share a chat with this user
+    val relatedUserIds = DatabaseFactory.dbQuery {
+        val userChatIds = ChatParticipants.selectAll()
+            .where { ChatParticipants.userId eq userId }
+            .map { it[ChatParticipants.chatId] }
+
+        if (userChatIds.isEmpty()) return@dbQuery emptySet<Int>()
+
+        ChatParticipants.selectAll()
+            .where { (ChatParticipants.chatId inList userChatIds) and (ChatParticipants.userId neq userId) }
+            .map { it[ChatParticipants.userId] }
+            .toSet()
+    }
+
+    relatedUserIds.forEach { pid ->
+        connections[pid]?.send(Frame.Text(envelope))
     }
 }

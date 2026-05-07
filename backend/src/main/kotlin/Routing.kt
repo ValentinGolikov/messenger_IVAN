@@ -178,37 +178,59 @@ fun Application.configureRouting(authService: AuthService) {
             call.respond(mapOf("chatId" to chatId))
         }
 
-        /** Get messages for a chat (last 50, oldest first) */
+        /** Get messages for a chat (last 50, oldest first) — from Cassandra */
         get("/chats/{chatId}/messages") {
             val chatId = call.parameters["chatId"]?.toIntOrNull()
                 ?: return@get call.respond(HttpStatusCode.BadRequest)
 
-            val messages = DatabaseFactory.dbQuery {
-                (Messages innerJoin Users)
-                    .select(
-                        Messages.id,
-                        Messages.chatId,
-                        Messages.senderId,
-                        Users.displayName,
-                        Messages.text,
-                        Messages.timestamp
-                    )
-                    .where { (Messages.chatId eq chatId) and (Messages.isDeleted eq false) }
-                    .orderBy(Messages.timestamp, SortOrder.DESC)
-                    .limit(50)
-                    .map { row ->
-                        MessageDto(
-                            id = row[Messages.id],
-                            chatId = row[Messages.chatId],
-                            senderId = row[Messages.senderId],
-                            senderName = row[Users.displayName],
-                            text = row[Messages.text],
-                            timestamp = row[Messages.timestamp]
-                        )
+            val senderNames = mutableMapOf<Int, String>()
+
+            val messages = CassandraFactory.getMessages(chatId, 50)
+                .filter { !it.isDeleted }
+                .map { msg ->
+                    val senderName = senderNames.getOrPut(msg.senderId) {
+                        DatabaseFactory.dbQuery {
+                            Users.selectAll()
+                                .where { Users.id eq msg.senderId }
+                                .singleOrNull()?.get(Users.displayName) ?: "Unknown"
+                        }
                     }
-                    .reversed()
-            }
+                    MessageDto(
+                        id = msg.id.toString(),
+                        chatId = msg.chatId,
+                        senderId = msg.senderId,
+                        senderName = senderName,
+                        text = msg.text,
+                        timestamp = msg.timestamp,
+                        status = msg.status
+                    )
+                }
             call.respond(messages)
+        }
+
+        /** Mark messages as read */
+        post("/chats/{chatId}/read") {
+            val chatId = call.parameters["chatId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val params = call.receiveParameters()
+            val userId = params["userId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val lastMessageId = params["lastMessageId"]
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+
+            val uuid = try { UUID.fromString(lastMessageId) }
+                       catch (e: Exception) { return@post call.respond(HttpStatusCode.BadRequest) }
+
+            CassandraFactory.markMessagesAsRead(chatId, uuid, userId)
+            call.respond(HttpStatusCode.OK)
+        }
+
+        /** Check online status for a list of user IDs */
+        get("/users/online") {
+            val idsParam = call.request.queryParameters["ids"] ?: ""
+            val ids = idsParam.split(",").mapNotNull { it.trim().toIntOrNull() }
+            if (ids.isEmpty()) return@get call.respond(emptyMap<Int, Boolean>())
+            call.respond(RedisFactory.getOnlineUsers(ids))
         }
 
         // ── Invite links ──────────────────────────────────────────────────────
@@ -413,13 +435,13 @@ fun Application.configureRouting(authService: AuthService) {
                         .where { Users.id eq inviterId }
                         .single()[Users.displayName]
 
-                    // Send the invite link as a system message in the DM
-                    Messages.insert {
-                        it[Messages.chatId] = dmChatId
-                        it[senderId] = inviterId
-                        it[text] = "$inviterName приглашает вас в «$chatTitle»: /join/$inviteToken"
-                        it[timestamp] = now
-                    }
+                    // Send the invite link as a system message in the DM (via Cassandra)
+                    CassandraFactory.insertMessage(
+                        chatId = dmChatId,
+                        senderId = inviterId,
+                        text = "$inviterName приглашает вас в «$chatTitle»: /join/$inviteToken",
+                        timestamp = now
+                    )
 
                     mapOf("method" to "invite_dm", "dmChatId" to dmChatId.toString(), "token" to inviteToken)
                 }
@@ -517,24 +539,21 @@ private fun getChatListForUser(userId: Int): List<ChatDto> {
             }
         }
 
-        val lastMsg = (Messages innerJoin Users)
-            .select(
-                Messages.id, Messages.chatId, Messages.senderId,
-                Users.displayName, Messages.text, Messages.timestamp
+        // Last message from Cassandra
+        val lastMsg = CassandraFactory.getLastMessage(cId)?.let { msg ->
+            val senderName = Users.selectAll()
+                .where { Users.id eq msg.senderId }
+                .singleOrNull()?.get(Users.displayName) ?: "Unknown"
+            MessageDto(
+                id = msg.id.toString(),
+                chatId = msg.chatId,
+                senderId = msg.senderId,
+                senderName = senderName,
+                text = msg.text,
+                timestamp = msg.timestamp,
+                status = msg.status
             )
-            .where { (Messages.chatId eq cId) and (Messages.isDeleted eq false) }
-            .orderBy(Messages.timestamp, SortOrder.DESC)
-            .limit(1)
-            .firstOrNull()?.let { row ->
-                MessageDto(
-                    id = row[Messages.id],
-                    chatId = row[Messages.chatId],
-                    senderId = row[Messages.senderId],
-                    senderName = row[Users.displayName],
-                    text = row[Messages.text],
-                    timestamp = row[Messages.timestamp]
-                )
-            }
+        }
 
         ChatDto(
             id = cId,
@@ -544,7 +563,7 @@ private fun getChatListForUser(userId: Int): List<ChatDto> {
             otherUserId = otherUserId,
             otherUserName = otherUserName,
             lastMessage = lastMsg,
-            unreadCount = 0 // TODO: implement read tracking
+            unreadCount = 0 // TODO: implement unread count via Cassandra
         )
     }
 }

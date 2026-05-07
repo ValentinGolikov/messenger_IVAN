@@ -48,17 +48,19 @@ data class YandexPhoneDto(
 data class ChatMessage(
     val chatId: Int,
     val text: String,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val clientId: String? = null
 )
 
 @Serializable
 data class MessageDto(
-    val id: Int = 0,
+    val id: String = "",        // TimeUUID as string
     val chatId: Int,
     val senderId: Int,
     val senderName: String,
     val text: String,
-    val timestamp: Long
+    val timestamp: Long,
+    val status: String = "sent" // "sent" | "delivered" | "read"
 )
 
 @Serializable
@@ -112,6 +114,28 @@ data class JoinByInviteResponse(
 data class WsEnvelope(
     val type: String,
     val payload: String
+)
+
+/** Notification about message status change */
+@Serializable
+data class StatusUpdateEvent(
+    val messageId: String,
+    val chatId: Int,
+    val status: String // "delivered" | "read"
+)
+
+/** User online/offline event */
+@Serializable
+data class PresenceEvent(
+    val userId: Int,
+    val online: Boolean
+)
+
+/** Client → server: "I read messages up to this ID" */
+@Serializable
+data class ReadAckRequest(
+    val chatId: Int,
+    val lastMessageId: String
 )
 
 // ── HTTP client singleton ─────────────────────────────────────────────────────
@@ -184,6 +208,26 @@ object NetworkClient {
 
     suspend fun getChatMessages(chatId: Int): List<MessageDto> =
         httpClient.get(buildUrl("/chats/$chatId/messages")).body()
+
+    // ── Read status ───────────────────────────────────────────────────────────
+
+    suspend fun markAsRead(chatId: Int, userId: Int, lastMessageId: String) {
+        httpClient.post(buildUrl("/chats/$chatId/read")) {
+            setBody(FormDataContent(Parameters.build {
+                append("userId", userId.toString())
+                append("lastMessageId", lastMessageId)
+            }))
+        }
+    }
+
+    // ── Online status ─────────────────────────────────────────────────────────
+
+    suspend fun getOnlineStatus(userIds: List<Int>): Map<Int, Boolean> {
+        if (userIds.isEmpty()) return emptyMap()
+        return httpClient.get(buildUrl("/users/online")) {
+            parameter("ids", userIds.joinToString(","))
+        }.body()
+    }
 
     // ── Invites ───────────────────────────────────────────────────────────────
 

@@ -14,6 +14,8 @@ fun main(args: Array<String>): Unit = EngineMain.main(args)
 
 fun Application.module() {
     DatabaseFactory.init()
+    CassandraFactory.init()
+    RedisFactory.init()
 
     val httpClient = HttpClient(CIO) {
         install(ClientContentNegotiation) {
@@ -28,4 +30,10 @@ fun Application.module() {
 
     configureRouting(authService)
     configureSockets()
+
+    // Graceful shutdown
+    monitor.subscribe(ApplicationStopped) {
+        CassandraFactory.shutdown()
+        RedisFactory.shutdown()
+    }
 }

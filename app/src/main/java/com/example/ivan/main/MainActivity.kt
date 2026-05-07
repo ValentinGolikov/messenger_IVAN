@@ -53,28 +53,40 @@ class MainActivity : ComponentActivity() {
                     // Only reachable after userId is set
                     ChatsScreen(
                         userId = userId ?: return@composable,
-                        onOpenChat = { chatId, title ->
-                            navController.navigate("chat/$chatId?title=${Uri.encode(title)}")
+                        onOpenChat = { chatId, title, chatType, otherUserId ->
+                            navController.navigate("chat/$chatId?title=${Uri.encode(title)}&chatType=$chatType&otherUserId=${otherUserId ?: -1}")
                         }
                     )
                 }
 
                 composable(
-                    route = "chat/{chatId}?title={title}",
+                    route = "chat/{chatId}?title={title}&chatType={chatType}&otherUserId={otherUserId}",
                     arguments = listOf(
                         navArgument("chatId") { type = NavType.IntType },
                         navArgument("title") {
                             type = NavType.StringType
                             defaultValue = ""
+                        },
+                        navArgument("chatType") {
+                            type = NavType.StringType
+                            defaultValue = "dm"
+                        },
+                        navArgument("otherUserId") {
+                            type = NavType.IntType
+                            defaultValue = -1
                         }
                     )
                 ) { backStack ->
                     val chatId = backStack.arguments?.getInt("chatId") ?: return@composable
                     val title = backStack.arguments?.getString("title") ?: ""
+                    val chatType = backStack.arguments?.getString("chatType") ?: "dm"
+                    val otherUserId = backStack.arguments?.getInt("otherUserId")?.takeIf { it >= 0 }
                     ChatScreen(
                         userId = userId ?: return@composable,
                         chatId = chatId,
                         chatTitle = title,
+                        chatType = chatType,
+                        otherUserId = otherUserId,
                         onBack = { navController.popBackStack() }
                     )
                 }

@@ -37,6 +37,8 @@ fun ChatScreen(
     userId: Int,
     chatId: Int,
     chatTitle: String,
+    chatType: String = "dm",
+    otherUserId: Int? = null,
     onBack: () -> Unit
 ) {
     val vm: ChatViewModel = viewModel(factory = ChatViewModel.Factory(userId, chatId))
@@ -47,7 +49,13 @@ fun ChatScreen(
     var showInviteSheet by remember { mutableStateOf(false) }
     var showAddMemberSheet by remember { mutableStateOf(false) }
     val inviteToken by vm.inviteToken.collectAsState()
+    val otherUserOnline by vm.otherUserOnline.collectAsState()
     val context = LocalContext.current
+
+    // Set other user for presence tracking in DM
+    LaunchedEffect(otherUserId) {
+        vm.setOtherUser(otherUserId)
+    }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -60,21 +68,45 @@ fun ChatScreen(
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            modifier = Modifier.size(36.dp),
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primaryContainer
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = chatTitle.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
+                        // Avatar with online indicator
+                        Box {
+                            Surface(
+                                modifier = Modifier.size(36.dp),
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primaryContainer
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = chatTitle.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
+                            // Online indicator dot
+                            if (chatType == "dm" && otherUserOnline) {
+                                Surface(
+                                    modifier = Modifier
+                                        .size(12.dp)
+                                        .align(Alignment.BottomEnd),
+                                    shape = CircleShape,
+                                    color = Color(0xFF4CAF50),
+                                    shadowElevation = 2.dp
+                                ) {}
                             }
                         }
                         Spacer(modifier = Modifier.width(10.dp))
-                        Text(chatTitle, fontWeight = FontWeight.SemiBold)
+                        Column {
+                            Text(chatTitle, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                            if (chatType == "dm") {
+                                Text(
+                                    text = if (otherUserOnline) "в сети" else "не в сети",
+                                    fontSize = 12.sp,
+                                    color = if (otherUserOnline) Color(0xFF4CAF50)
+                                            else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                 },
                 navigationIcon = {
@@ -350,16 +382,48 @@ fun MessageBubble(message: MessageDto, isOwn: Boolean) {
                     text = message.text,
                     color = if (isOwn) Color.White else MaterialTheme.colorScheme.onSurface
                 )
-                Text(
-                    text = time,
-                    fontSize = 10.sp,
-                    color = if (isOwn) Color.White.copy(alpha = 0.7f)
-                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                    modifier = Modifier.align(Alignment.End)
-                )
+                Row(
+                    modifier = Modifier.align(Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text(
+                        text = time,
+                        fontSize = 10.sp,
+                        color = if (isOwn) Color.White.copy(alpha = 0.7f)
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    )
+                    // Status indicator for own messages
+                    if (isOwn) {
+                        MessageStatusIcon(
+                            status = message.status,
+                            tint = when (message.status) {
+                                "read" -> Color(0xFF64B5F6) // blue checkmarks
+                                else -> Color.White.copy(alpha = 0.7f)
+                            }
+                        )
+                    }
+                }
             }
         }
     }
+}
+
+/** Displays ✓ for sent, ✓✓ for delivered/read */
+@Composable
+fun MessageStatusIcon(status: String, tint: Color) {
+    val text = when (status) {
+        "sent" -> "✓"
+        "delivered" -> "✓✓"
+        "read" -> "✓✓"
+        else -> ""
+    }
+    Text(
+        text = text,
+        fontSize = 11.sp,
+        color = tint,
+        fontWeight = FontWeight.Bold
+    )
 }
 
 /**

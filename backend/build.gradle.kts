@@ -33,9 +33,13 @@ dependencies {
     implementation("io.ktor:ktor-server-config-yaml")
     implementation("org.jetbrains.exposed:exposed-core:0.61.0")
     implementation("org.jetbrains.exposed:exposed-jdbc:0.61.0")
-    implementation("com.h2database:h2:2.3.232")
     implementation("org.postgresql:postgresql:42.7.10")
     implementation("io.ktor:ktor-client-content-negotiation:3.4.1")
+    // Cassandra
+    implementation("org.apache.cassandra:java-driver-core:4.19.0")
+    implementation("org.apache.cassandra:java-driver-query-builder:4.19.0")
+    // Redis
+    implementation("io.lettuce:lettuce-core:6.5.5.RELEASE")
     testImplementation("io.ktor:ktor-server-test-host")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit:$kotlin_version")
 }

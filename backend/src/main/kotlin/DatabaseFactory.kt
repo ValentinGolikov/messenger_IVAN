@@ -23,7 +23,6 @@ object DatabaseFactory {
                 Contacts,
                 Chats,
                 ChatParticipants,
-                Messages,
                 ChatInvites
             )
         }

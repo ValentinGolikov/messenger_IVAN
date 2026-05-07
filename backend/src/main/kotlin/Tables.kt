@@ -52,19 +52,6 @@ object ChatParticipants : Table("chat_participants") {
 }
 
 /**
- * Messages — belong to a chat.
- */
-object Messages : Table("messages") {
-    val id = integer("id").autoIncrement()
-    val chatId = integer("chat_id").references(Chats.id, onDelete = ReferenceOption.CASCADE)
-    val senderId = integer("sender_id").references(Users.id)
-    val text = text("text")
-    val timestamp = long("timestamp")
-    val isDeleted = bool("is_deleted").default(false)
-    override val primaryKey = PrimaryKey(id)
-}
-
-/**
  * ChatInvites — shareable invite links for group chats.
  * token is a random UUID used in the invite URL.
  * maxUses: null = unlimited

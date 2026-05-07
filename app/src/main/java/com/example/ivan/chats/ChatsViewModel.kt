@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.ivan.main.ChatDto
 import com.example.ivan.main.NetworkClient
 import com.example.ivan.main.UserDto
+import com.example.ivan.main.WsManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -27,9 +28,14 @@ class ChatsViewModel(private val userId: Int) : ViewModel() {
     private val _contacts = MutableStateFlow<List<UserDto>>(emptyList())
     val contacts: StateFlow<List<UserDto>> = _contacts
 
+    /** Map of userId → online status */
+    private val _onlineStatuses = MutableStateFlow<Map<Int, Boolean>>(emptyMap())
+    val onlineStatuses: StateFlow<Map<Int, Boolean>> = _onlineStatuses
+
     init {
         loadChats()
         loadContacts()
+        collectPresenceUpdates()
     }
 
     fun loadChats() {
@@ -38,6 +44,17 @@ class ChatsViewModel(private val userId: Int) : ViewModel() {
             try {
                 val chats = NetworkClient.getChats(userId)
                 _uiState.value = ChatsUiState.Success(chats)
+
+                // Load online statuses for DM chat partners
+                val dmPartnerIds = chats
+                    .filter { it.type == "dm" }
+                    .mapNotNull { it.otherUserId }
+                if (dmPartnerIds.isNotEmpty()) {
+                    try {
+                        val statuses = NetworkClient.getOnlineStatus(dmPartnerIds)
+                        _onlineStatuses.value = statuses
+                    } catch (_: Exception) {}
+                }
             } catch (e: Exception) {
                 _uiState.value = ChatsUiState.Error(e.message ?: "Unknown error")
             }
@@ -50,6 +67,15 @@ class ChatsViewModel(private val userId: Int) : ViewModel() {
                 _contacts.value = NetworkClient.getContacts(userId)
             } catch (e: Exception) {
                 // non-critical
+            }
+        }
+    }
+
+    /** Collect real-time presence updates from WebSocket */
+    private fun collectPresenceUpdates() {
+        viewModelScope.launch {
+            WsManager.presenceUpdates.collect { event ->
+                _onlineStatuses.value = _onlineStatuses.value + (event.userId to event.online)
             }
         }
     }

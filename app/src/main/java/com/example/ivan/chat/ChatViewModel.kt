@@ -7,8 +7,10 @@ import com.example.ivan.BuildConfig
 import com.example.ivan.main.ChatMessage
 import com.example.ivan.main.MessageDto
 import com.example.ivan.main.NetworkClient
+import com.example.ivan.main.PresenceEvent
 import com.example.ivan.main.UserDto
 import com.example.ivan.main.WsEnvelope
+import com.example.ivan.main.WsManager
 import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
@@ -31,17 +33,34 @@ class ChatViewModel(
     private val _memberSearchResults = MutableStateFlow<List<UserDto>>(emptyList())
     val memberSearchResults: StateFlow<List<UserDto>> = _memberSearchResults
 
+    /** Online status of the other user (for DM chats) */
+    private val _otherUserOnline = MutableStateFlow(false)
+    val otherUserOnline: StateFlow<Boolean> = _otherUserOnline
+
+    /** ID of the other user in DM */
+    var otherUserId: Int? = null
+        private set
+
     private var wsSession: io.ktor.client.plugins.websocket.ClientWebSocketSession? = null
 
     init {
         loadHistory()
         connectWebSocket()
+        collectStatusUpdates()
+        collectPresenceUpdates()
     }
 
     private fun loadHistory() {
         viewModelScope.launch {
             try {
-                _messages.value = NetworkClient.getChatMessages(chatId)
+                val msgs = NetworkClient.getChatMessages(chatId)
+                _messages.value = msgs
+
+                // Send read ack for the last message from other users
+                val lastFromOther = msgs.lastOrNull { it.senderId != userId }
+                if (lastFromOther != null && lastFromOther.id.isNotEmpty()) {
+                    WsManager.sendReadAck(chatId, lastFromOther.id)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -64,6 +83,11 @@ class ChatViewModel(
                                     // Only append if it belongs to this chat
                                     if (msg.chatId == chatId) {
                                         _messages.value = _messages.value + msg
+
+                                        // If message is from someone else, send read ack immediately
+                                        if (msg.senderId != userId && msg.id.isNotEmpty()) {
+                                            WsManager.sendReadAck(chatId, msg.id)
+                                        }
                                     }
                                 }
                             }
@@ -72,6 +96,47 @@ class ChatViewModel(
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
+            }
+        }
+    }
+
+    /** Collect status updates from WsManager and update message statuses */
+    private fun collectStatusUpdates() {
+        viewModelScope.launch {
+            WsManager.statusUpdates.collect { event ->
+                if (event.chatId == chatId) {
+                    _messages.value = _messages.value.map { msg ->
+                        if (msg.id == event.messageId) {
+                            msg.copy(status = event.status)
+                        } else msg
+                    }
+                }
+            }
+        }
+    }
+
+    /** Collect presence updates for the other user in DM */
+    private fun collectPresenceUpdates() {
+        viewModelScope.launch {
+            WsManager.presenceUpdates.collect { event ->
+                if (event.userId == otherUserId) {
+                    _otherUserOnline.value = event.online
+                }
+            }
+        }
+    }
+
+    /** Set the other user ID (for DM chats) and load their online status */
+    fun setOtherUser(otherId: Int?) {
+        otherUserId = otherId
+        if (otherId != null) {
+            viewModelScope.launch {
+                try {
+                    val statuses = NetworkClient.getOnlineStatus(listOf(otherId))
+                    _otherUserOnline.value = statuses[otherId] == true
+                } catch (e: Exception) {
+                    // ignore
+                }
             }
         }
     }

@@ -31,11 +31,12 @@ import java.util.Locale
 @Composable
 fun ChatsScreen(
     userId: Int,
-    onOpenChat: (chatId: Int, title: String) -> Unit
+    onOpenChat: (chatId: Int, title: String, chatType: String, otherUserId: Int?) -> Unit
 ) {
     val vm: ChatsViewModel = viewModel(factory = ChatsViewModel.Factory(userId))
     val uiState by vm.uiState.collectAsState()
     val searchResults by vm.searchResults.collectAsState()
+    val onlineStatuses by vm.onlineStatuses.collectAsState()
 
     var showNewChatSheet by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
@@ -102,7 +103,7 @@ fun ChatsScreen(
                             user = user,
                             onOpenDm = {
                                 vm.openDm(user.id) { chatId ->
-                                    onOpenChat(chatId, user.displayName)
+                                    onOpenChat(chatId, user.displayName, "dm", user.id)
                                 }
                             },
                             onAddContact = { vm.addContact(user.id) }
@@ -141,12 +142,14 @@ fun ChatsScreen(
                         } else {
                             LazyColumn(modifier = Modifier.fillMaxSize()) {
                                 items(s.chats, key = { it.id }) { chat ->
+                                    val isOnline = chat.otherUserId?.let { onlineStatuses[it] } ?: false
                                     ChatListItem(
                                         chat = chat,
                                         currentUserId = userId,
+                                        isOtherOnline = isOnline,
                                         onClick = {
                                             val title = chatTitle(chat)
-                                            onOpenChat(chat.id, title)
+                                            onOpenChat(chat.id, title, chat.type, chat.otherUserId)
                                         }
                                     )
                                     HorizontalDivider(modifier = Modifier.padding(start = 72.dp))
@@ -164,7 +167,9 @@ fun ChatsScreen(
         NewChatSheet(
             userId = userId,
             vm = vm,
-            onOpenChat = onOpenChat,
+            onOpenChat = { chatId, title ->
+                onOpenChat(chatId, title, "group", null)
+            },
             onDismiss = { showNewChatSheet = false }
         )
     }
@@ -174,6 +179,7 @@ fun ChatsScreen(
 private fun ChatListItem(
     chat: ChatDto,
     currentUserId: Int,
+    isOtherOnline: Boolean,
     onClick: () -> Unit
 ) {
     val title = chatTitle(chat)
@@ -189,21 +195,34 @@ private fun ChatListItem(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Avatar placeholder
-        Surface(
-            modifier = Modifier.size(52.dp),
-            shape = CircleShape,
-            color = if (chat.type == "dm") MaterialTheme.colorScheme.primaryContainer
-            else MaterialTheme.colorScheme.tertiaryContainer
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Text(
-                    text = title.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (chat.type == "dm") MaterialTheme.colorScheme.onPrimaryContainer
-                    else MaterialTheme.colorScheme.onTertiaryContainer
-                )
+        // Avatar placeholder with online indicator
+        Box {
+            Surface(
+                modifier = Modifier.size(52.dp),
+                shape = CircleShape,
+                color = if (chat.type == "dm") MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.tertiaryContainer
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = title.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (chat.type == "dm") MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                }
+            }
+            // Online indicator for DM chats
+            if (chat.type == "dm" && isOtherOnline) {
+                Surface(
+                    modifier = Modifier
+                        .size(14.dp)
+                        .align(Alignment.BottomEnd),
+                    shape = CircleShape,
+                    color = Color(0xFF4CAF50),
+                    shadowElevation = 2.dp
+                ) {}
             }
         }
 
@@ -239,6 +258,23 @@ private fun ChatListItem(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.width(4.dp))
+                }
+                // Status indicator for last message
+                if (chat.lastMessage != null && chat.lastMessage.senderId == currentUserId) {
+                    val statusText = when (chat.lastMessage.status) {
+                        "sent" -> "✓ "
+                        "delivered" -> "✓✓ "
+                        "read" -> "✓✓ "
+                        else -> ""
+                    }
+                    val statusColor = if (chat.lastMessage.status == "read")
+                        Color(0xFF64B5F6) else MaterialTheme.colorScheme.onSurfaceVariant
+                    Text(
+                        text = statusText,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = statusColor
+                    )
                 }
                 Text(
                     text = if (chat.lastMessage?.senderId == currentUserId)

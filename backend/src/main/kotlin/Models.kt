@@ -66,18 +66,20 @@ data class CreateGroupResponse(
 data class ChatMessage(
     val chatId: Int,
     val text: String,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val clientId: String? = null  // optional idempotency key from client
 )
 
 /** Broadcast to clients over WebSocket / returned in history */
 @Serializable
 data class MessageDto(
-    val id: Int = 0,
+    val id: String = "",        // TimeUUID as string
     val chatId: Int,
     val senderId: Int,
     val senderName: String,
     val text: String,
-    val timestamp: Long
+    val timestamp: Long,
+    val status: String = "sent" // "sent" | "delivered" | "read"
 )
 
 // ── Contacts ──────────────────────────────────────────────────────────────────
@@ -117,9 +119,33 @@ data class JoinByInviteResponse(
 /**
  * Generic envelope sent over the WebSocket so the client can distinguish
  * message types without a separate connection per feature.
+ *
+ * type: "message" | "chat_created" | "user_added" | "status_update" | "presence" | "read_ack"
  */
 @Serializable
 data class WsEnvelope(
-    val type: String,   // "message" | "chat_created" | "user_added"
+    val type: String,
     val payload: String // JSON-encoded payload
+)
+
+/** Notification about message status change */
+@Serializable
+data class StatusUpdateEvent(
+    val messageId: String,
+    val chatId: Int,
+    val status: String // "delivered" | "read"
+)
+
+/** User online/offline event */
+@Serializable
+data class PresenceEvent(
+    val userId: Int,
+    val online: Boolean
+)
+
+/** Client → server: "I read messages up to this ID" */
+@Serializable
+data class ReadAckRequest(
+    val chatId: Int,
+    val lastMessageId: String
 )
