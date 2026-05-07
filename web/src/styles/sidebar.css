@@ -6,6 +6,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
 }
 
 /* Header */
@@ -24,6 +25,7 @@
   border-radius: 8px;
   padding: 4px;
   transition: background 0.1s;
+  min-width: 0;
 }
 
 .sidebar-user:hover {
@@ -60,8 +62,12 @@
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: #22c55e;
+  background: var(--text-muted);
   border: 2px solid var(--surface);
+}
+
+.avatar-online-dot.online {
+  background: #22c55e;
 }
 
 .user-name {
@@ -250,6 +256,7 @@
   display: flex;
   align-items: center;
   gap: 2px;
+  min-width: 0;
 }
 
 .chat-time {
@@ -275,4 +282,53 @@
   border-radius: 10px;
   padding: 1px 7px;
   flex-shrink: 0;
+}
+
+@media (max-width: 720px) {
+  .sidebar {
+    border-right: none;
+  }
+
+  .sidebar-header {
+    padding: calc(12px + env(safe-area-inset-top)) 14px 12px;
+  }
+
+  .sidebar-actions {
+    gap: 2px;
+  }
+
+  .user-name {
+    max-width: min(42vw, 180px);
+  }
+
+  .sidebar-search {
+    padding: 10px 14px;
+  }
+
+  .sidebar-search input {
+    min-width: 0;
+  }
+
+  .chat-item {
+    padding: 12px 14px;
+  }
+
+  .chat-last-msg {
+    max-width: 58vw;
+  }
+}
+
+@media (max-width: 380px) {
+  .sidebar-header {
+    gap: 8px;
+  }
+
+  .icon-btn {
+    width: 30px;
+    height: 30px;
+  }
+
+  .user-name {
+    max-width: 32vw;
+  }
 }

@@ -6,7 +6,7 @@ import ForwardModal from './ForwardModal'
 import ProfileModal from './ProfileModal'
 import '../styles/chat.css'
 
-export default function ChatArea({ chat, messages, onSend, onClearHistory, chats, appearance, getAlias, setAlias, onUpdateContactAvatar }) {
+export default function ChatArea({ chat, messages, onSend, onRetry, onBack, onClearHistory, chats, appearance, getAlias, setAlias, onUpdateContactAvatar }) {
   const [input, setInput]               = useState('')
   const [showEmoji, setShowEmoji]       = useState(false)
   const [showMenu, setShowMenu]         = useState(false)
@@ -98,6 +98,11 @@ export default function ChatArea({ chat, messages, onSend, onClearHistory, chats
 
   function buildMsgMenu(msg) {
     return [
+      ...(msg.status === 'failed' ? [{
+        label: 'Повторить отправку',
+        icon: '↻',
+        action: () => onRetry?.(msg),
+      }, { divider: true }] : []),
       {
         label: 'Ответить',
         icon: '↩️',
@@ -133,6 +138,7 @@ export default function ChatArea({ chat, messages, onSend, onClearHistory, chats
   // Build messages with date separators
   const messageElements = []
   let lastDayLabel = null
+  const encryptionCopy = getEncryptionCopy(chat.encryptionStatus)
   messages.forEach(msg => {
     const dayLabel = getDayLabel(msg.time)
     if (dayLabel !== lastDayLabel) {
@@ -147,6 +153,9 @@ export default function ChatArea({ chat, messages, onSend, onClearHistory, chats
           className="message-bubble"
           onContextMenu={e => handleMsgContextMenu(e, msg)}
         >
+          {chat.type === 'group' && msg.from !== 'me' && (
+            <span className="message-sender">{msg.senderName || 'Участник'}</span>
+          )}
           {msg.replyTo && (
             <div className="msg-reply-quote">
               <div className="msg-reply-bar" />
@@ -175,8 +184,12 @@ export default function ChatArea({ chat, messages, onSend, onClearHistory, chats
           <div className="message-meta">
             <span className="message-time">{msg.time}</span>
             {msg.from === 'me' && <MessageStatus status={msg.status} />}
-            {chat.e2e && <span className="msg-lock"><LockTinyIcon /></span>}
           </div>
+          {msg.status === 'failed' && (
+            <button className="message-retry" onClick={() => onRetry?.(msg)}>
+              Повторить
+            </button>
+          )}
         </div>
       </div>
     )
@@ -197,6 +210,9 @@ export default function ChatArea({ chat, messages, onSend, onClearHistory, chats
 
       {/* Header */}
       <div className="chat-header">
+        <button className="mobile-back-btn" onClick={onBack} title="К списку чатов">
+          <BackIcon />
+        </button>
         <button className="chat-header-identity" onClick={() => setShowContactProfile(true)}>
           <div className="chat-header-avatar">
             {chat.customAvatar
@@ -207,12 +223,13 @@ export default function ChatArea({ chat, messages, onSend, onClearHistory, chats
           <div className="chat-header-info">
             <div className="chat-header-name-row">
               <span className="chat-header-name">{chatName}</span>
-            {chat.e2e && (
-              <span className="e2e-badge"><LockIcon /> E2E</span>
-            )}
+              <span className={`e2e-badge ${encryptionCopy.tone}`}>
+                <ShieldIcon status={chat.encryptionStatus} />
+                {encryptionCopy.short}
+              </span>
           </div>
             <span className="chat-header-status">
-              {chat.online ? '🟢 в сети' : '⚫ не в сети'}
+              {chat.type === 'group' ? `${chat.members?.length || 0} участников` : getPresenceCopy(chat)}
             </span>
           </div>
         </button>
@@ -235,12 +252,10 @@ export default function ChatArea({ chat, messages, onSend, onClearHistory, chats
       </div>
 
       {/* E2E notice */}
-      {chat.e2e && (
-        <div className="e2e-notice">
-          <LockIcon />
-          Сообщения защищены сквозным шифрованием (E2E). Никто, кроме участников, не может их прочитать.
-        </div>
-      )}
+      <div className={`e2e-notice ${encryptionCopy.tone}`}>
+        <ShieldIcon status={chat.encryptionStatus} />
+        {encryptionCopy.notice}
+      </div>
 
       {/* Messages */}
       <div
@@ -382,6 +397,12 @@ export default function ChatArea({ chat, messages, onSend, onClearHistory, chats
 // ── Sub-components ──
 function MessageStatus({ status }) {
   if (!status) return null
+  if (status === 'pending') {
+    return <span className="msg-status pending" title="Отправляется">…</span>
+  }
+  if (status === 'failed') {
+    return <span className="msg-status failed" title="Не отправлено">!</span>
+  }
   if (status === 'read') {
     return (
       <span className="msg-status read" title="Прочитано">
@@ -401,19 +422,46 @@ function MessageStatus({ status }) {
   )
 }
 
-function LockIcon() {
+function ShieldIcon({ status }) {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-      <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      {status === 'verified'
+        ? <path d="M8.5 12.5l2.2 2.2 4.8-5" />
+        : <path d="M8 8l8 8M16 8l-8 8" />
+      }
     </svg>
   )
 }
-function LockTinyIcon() {
+
+function BackIcon() {
   return (
-    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-      <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
+      <path d="M19 12H5" />
+      <path d="M12 19l-7-7 7-7" />
     </svg>
   )
+}
+
+function getEncryptionCopy(status) {
+  if (status === 'verified') {
+    return {
+      tone: 'secure',
+      short: 'E2E',
+      notice: 'Сквозное шифрование активно и ключи подтверждены.',
+    }
+  }
+  return {
+    tone: 'warning',
+    short: 'E2E не активно',
+    notice: 'Сквозное шифрование пока не активировано: для выполнения требования заказчика нужен серверный протокол ключей и подтверждение устройств.',
+  }
+}
+
+function getPresenceCopy(chat) {
+  if (chat.presenceStatus === 'online') return '🟢 в сети'
+  if (chat.presenceStatus === 'offline') return '⚫ не в сети'
+  return 'статус неизвестен'
 }
 function DotsIcon() {
   return (

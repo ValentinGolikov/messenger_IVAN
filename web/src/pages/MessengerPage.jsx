@@ -5,6 +5,7 @@ import { useTheme } from '../hooks/useTheme'
 import { useSettings } from '../hooks/useSettings'
 import { useAppearance } from '../hooks/useAppearance'
 import { useContactAliases } from '../hooks/useContactAliases'
+import { useNetworkStatus } from '../hooks/useNetworkStatus'
 import {
   apiCreateDm,
   apiGetChats,
@@ -39,8 +40,9 @@ function mapChat(chat) {
     time: chat.lastMessage ? formatMessageTime(chat.lastMessage.timestamp) : '',
     unread: chat.unreadCount || 0,
     avatar: name[0] || '?',
-    online: false,
-    e2e: false,
+    presenceStatus: 'unknown',
+    encryptionStatus: 'not_configured',
+    members: chat.type === 'group' ? (chat.members || []) : undefined,
   }
 }
 
@@ -54,6 +56,7 @@ function mapMessage(msg, selfId) {
     status: msg.senderId === selfId ? 'sent' : null,
     timestamp: msg.timestamp,
     senderId: msg.senderId,
+    senderName: msg.senderName || null,
   }
 }
 
@@ -87,7 +90,9 @@ export default function MessengerPage() {
   const { settings, update } = useSettings()
   const { appearance, updateAppearance, resetAppearance } = useAppearance()
   const { getAlias, setAlias } = useContactAliases()
+  const isNetworkOnline = useNetworkStatus()
   const navigate = useNavigate()
+  const currentUser = user ? { ...user, online: isNetworkOnline } : user
 
   const wsRef = useRef(null)
   const reconnectTimerRef = useRef(null)
@@ -216,18 +221,55 @@ export default function MessengerPage() {
     navigate('/login')
   }
 
-  function handleSendMessage(text, file, targetChatId) {
+  function handleSendMessage(text, file, targetChatId, replyTo, retryMessageId = null) {
     const chatId = targetChatId ?? activeChatId
     if (!chatId) return
     const payloadText = text || (file ? `[ФАЙЛ] ${file.name} (${file.size})` : '')
     if (!payloadText.trim()) return
+
+    const time = formatMessageTime(Date.now())
+
+    if (retryMessageId) {
+      setMessages(prev => ({
+        ...prev,
+        [chatId]: (prev[chatId] || []).map(msg =>
+          msg.id === retryMessageId ? { ...msg, status: 'pending' } : msg
+        ),
+      }))
+    } else {
+      const optimistic = {
+        id: `local-${Date.now()}`,
+        chatId,
+        from: 'me',
+        text: payloadText,
+        time,
+        status: 'pending',
+        file: file || null,
+        replyTo: replyTo || null,
+        timestamp: Date.now(),
+      }
+      retryMessageId = optimistic.id
+      setMessages(prev => ({ ...prev, [chatId]: [...(prev[chatId] || []), optimistic] }))
+      setChats(prev => prev.map(c => c.id === chatId ? { ...c, lastMsg: payloadText, time } : c))
+    }
 
     const payload = {
       chatId,
       text: payloadText,
       timestamp: Date.now(),
     }
-    sendOrQueue(payload)
+    const sent = sendOrQueue(payload)
+    setMessages(prev => ({
+      ...prev,
+      [chatId]: (prev[chatId] || []).map(msg =>
+        msg.id === retryMessageId ? { ...msg, status: sent ? 'sent' : 'failed' } : msg
+      ),
+    }))
+  }
+
+  function handleRetryMessage(message) {
+    if (!activeChatId || message.status !== 'failed') return
+    handleSendMessage(message.text, message.file, activeChatId, message.replyTo, message.id)
   }
 
   function handleClearHistory() {
@@ -243,12 +285,38 @@ export default function MessengerPage() {
       name: u.displayName,
       username: String(u.id),
       avatar: (u.displayName || '?')[0],
-      online: false,
+      presenceStatus: 'unknown',
     }))
   }
 
   async function handleAddChat(foundUser) {
     if (!user?.id) return
+    if (foundUser.kind === 'group') {
+      const id = Date.now()
+      const name = foundUser.name.trim()
+      const group = {
+        id,
+        type: 'group',
+        name,
+        username: `group_${id}`,
+        email: '',
+        lastMsg: '',
+        time: '',
+        unread: 0,
+        avatar: name[0]?.toUpperCase() || 'Г',
+        presenceStatus: 'unknown',
+        encryptionStatus: 'not_configured',
+        members: [
+          { id: user.id, name: displayName || 'Вы', avatar: (displayName || 'В')[0] },
+          ...foundUser.members,
+        ],
+      }
+      setChats(prev => [...prev, group])
+      setMessages(prev => ({ ...prev, [id]: [] }))
+      setActiveChatId(id)
+      return
+    }
+
     const dm = await apiCreateDm(user.id, foundUser.id)
     const data = await apiGetChats(user.id)
     const mapped = withContactAvatars((data || []).map(mapChat))
@@ -271,12 +339,12 @@ export default function MessengerPage() {
   const activeChat = chats.find(c => c.id === activeChatId)
 
   return (
-    <div className="messenger">
+    <div className={`messenger ${activeChat ? 'mobile-chat-open' : ''}`}>
       <Sidebar
         chats={chats}
         activeChatId={activeChatId}
         onSelectChat={setActiveChatId}
-        user={user}
+        user={currentUser}
         onLogout={handleLogout}
         theme={theme}
         onToggleTheme={toggleTheme}
@@ -293,6 +361,8 @@ export default function MessengerPage() {
         messages={activeMessages}
         chats={chats}
         onSend={handleSendMessage}
+        onRetry={handleRetryMessage}
+        onBack={() => setActiveChatId(null)}
         onClearHistory={handleClearHistory}
         appearance={appearance}
         getAlias={getAlias}

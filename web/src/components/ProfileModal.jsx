@@ -45,6 +45,11 @@ export default function ProfileModal({ user, onClose, isOwnProfile, onSave, alia
     setTimeout(() => setSaved(false), 1500)
   }
 
+  const isOnline = user?.presenceStatus === 'online' || user?.online === true
+  const statusText = user?.presenceStatus === 'unknown'
+    ? 'Статус неизвестен'
+    : (isOnline ? '🟢 В сети' : '⚫ Не в сети')
+
   return (
     <div className="profile-overlay" onClick={onClose}>
       <div className="profile-modal" ref={ref} onClick={e => e.stopPropagation()}>
@@ -66,7 +71,7 @@ export default function ProfileModal({ user, onClose, isOwnProfile, onSave, alia
               </button>
             )}
           </div>
-          <span className={`profile-online-dot ${user?.online ? 'online' : ''}`} />
+          <span className={`profile-online-dot ${isOnline ? 'online' : ''}`} />
         </div>
 
         {canEditAvatar && (
@@ -110,7 +115,7 @@ export default function ProfileModal({ user, onClose, isOwnProfile, onSave, alia
         <p className="profile-username">@{user?.username ?? 'username'}</p>
 
         <div className="profile-status">
-          {user?.online ? '🟢 В сети' : '⚫ Не в сети'}
+            {statusText}
         </div>
 
         <div className="profile-info">

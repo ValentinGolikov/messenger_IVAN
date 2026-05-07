@@ -34,7 +34,8 @@ export default function Sidebar({
     return (
       c.name.toLowerCase().includes(search.toLowerCase()) ||
       c.username.toLowerCase().includes(search.toLowerCase()) ||
-      alias.toLowerCase().includes(search.toLowerCase())
+      alias.toLowerCase().includes(search.toLowerCase()) ||
+      c.members?.some(m => m.name.toLowerCase().includes(search.toLowerCase()))
     )
   })
 
@@ -127,7 +128,7 @@ export default function Sidebar({
                 ? <img src={user.avatar} alt={user?.displayName || user?.name} />
                 : <span>{(user?.displayName || user?.name)?.[0] ?? '?'}</span>
               }
-              <span className="avatar-online-dot" />
+              <span className={`avatar-online-dot ${user?.online ? 'online' : ''}`} />
             </div>
             <span className="user-name">{displayName ?? 'Пользователь'}</span>
           </button>
@@ -188,21 +189,21 @@ export default function Sidebar({
                       : chat.avatar
                     }
                   </div>
-                  {chat.online && <span className="chat-online-dot" />}
+                  {chat.presenceStatus === 'online' && <span className="chat-online-dot" />}
                 </div>
                 <div className="chat-info">
                   <div className="chat-top">
                     <span className="chat-name">
                       {isPinned && <span className="pin-icon">📌</span>}
                       {(getAlias && getAlias(chat.id)) || chat.name}
-                      {chat.e2e && <LockSmallIcon />}
+                      <EncryptionSmallIcon status={chat.encryptionStatus} />
                     </span>
                     <span className="chat-time">{chat.time}</span>
                   </div>
                   <div className="chat-bottom">
                     <span className="chat-last-msg">
                       {muted.has(chat.id) && <span className="muted-icon">🔕 </span>}
-                      {chat.lastMsg}
+                      {chat.lastMsg || (chat.type === 'group' ? `${chat.members?.length || 0} участников` : '')}
                     </span>
                     {chat.unread > 0 && !muted.has(chat.id) && (
                       <span className="unread-badge">{chat.unread}</span>
@@ -228,7 +229,7 @@ export default function Sidebar({
           user={user}
           onClose={() => setShowProfile(false)}
           isOwnProfile={true}
-          onSave={newName => saveUser && saveUser({ ...user, displayName: newName })}
+          onSave={newName => saveUser && saveUser({ ...user, displayName: newName }, { rememberDisplayName: true })}
           canEditAvatar={!!saveUser}
           onAvatarChange={dataUrl => saveUser && saveUser({ ...user, avatar: dataUrl })}
         />
@@ -245,10 +246,17 @@ function SearchIcon() {
     </svg>
   )
 }
-function LockSmallIcon() {
+function EncryptionSmallIcon({ status }) {
+  const title = status === 'verified'
+    ? 'Шифрование подтверждено'
+    : 'E2E не активировано: требуется серверный протокол ключей'
   return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginLeft: 3, verticalAlign: 'middle', color: 'var(--e2e-text)' }}>
-      <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" style={{ marginLeft: 3, verticalAlign: 'middle', color: status === 'verified' ? 'var(--e2e-text)' : 'var(--warning)' }} title={title}>
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      {status === 'verified'
+        ? <path d="M8.5 12.5l2.2 2.2 4.8-5" />
+        : <path d="M8 8l8 8M16 8l-8 8" />
+      }
     </svg>
   )
 }

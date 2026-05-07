@@ -1,5 +1,38 @@
 .messenger {
   display: flex;
   height: 100%;
+  min-height: 0;
   overflow: hidden;
+  background: var(--bg);
+}
+
+@supports (height: 100dvh) {
+  .messenger {
+    height: 100dvh;
+  }
+}
+
+@media (max-width: 720px) {
+  .messenger {
+    width: 100%;
+  }
+
+  .messenger .sidebar,
+  .messenger .chat-area {
+    width: 100%;
+    max-width: none;
+    flex: 0 0 100%;
+  }
+
+  .messenger .chat-area {
+    display: none;
+  }
+
+  .messenger.mobile-chat-open .sidebar {
+    display: none;
+  }
+
+  .messenger.mobile-chat-open .chat-area {
+    display: flex;
+  }
 }

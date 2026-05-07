@@ -1,8 +1,8 @@
-# messenger_IVAN — web_messenger
+# messenger_IVAN — web
 
-Ветка `web_messenger` содержит веб-клиент мессенджера (React + Vite), интегрированный с backend API и WebSocket.
+Веб-клиент мессенджера (React + Vite), интегрированный с backend API и WebSocket. Актуальная ветка для релиза `v0.1`: `main`.
 
-## Что реализовано в этой ветке
+## Что реализовано
 
 - Вход через Яндекс OAuth (frontend получает `access_token` и отправляет его на backend).
 - Авторизация через backend endpoint:
@@ -20,8 +20,12 @@
 - UI-функции:
   - список чатов, открытие диалога, отправка сообщений
   - поиск пользователей и создание DM
+  - создание групповых чатов на уровне frontend-прототипа
+  - честный статус шифрования: UI показывает, что E2E не активировано без серверного протокола ключей
+  - pending/failed/retry состояния отправки сообщений
+  - собственный online от состояния браузера (`online/offline`)
   - темы (light/dark), настройки, локальная кастомизация
-  - очистка локальных данных при выходе (`localStorage.clear()`)
+  - выход без удаления локальных пользовательских настроек и сохраненного имени
 
 ## Конфигурация
 
@@ -62,12 +66,14 @@ docker compose up -d --build
 2. Поддержка `OPTIONS` preflight.
 3. OAuth callback в Яндексе: `https://<frontend-domain>/auth/callback`.
 4. Доступный WebSocket upgrade для `/chat/{userId}`.
+5. Для настоящих групповых чатов: endpoints создания группы, участников и ролей.
+6. Для online контактов: WebSocket/API presence (`online`, `offline`, `last_seen`, heartbeat).
 
 ## Ограничения текущей ветки
 
 Следующие пункты требуют серверной реализации/доработок и не закрываются только frontend-изменениями:
 
-- криптографически реальное E2EE (не только UI-маркер),
+- криптографически реальное E2EE: device keys, key exchange, group keys, key verification, key rotation,
 - push-уведомления и anti-storm,
 - удаление аккаунта с grace period,
 - расширенная групповая ролевая модель (админ-действия),
