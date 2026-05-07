@@ -24,15 +24,6 @@ object Contacts : Table("contacts") {
     override val primaryKey = PrimaryKey(userId, contactId)
 }
 
-object PasswordAccounts : Table("password_accounts") {
-    val login = varchar("login", 50).uniqueIndex()
-    val userId = integer("user_id").references(Users.id, onDelete = ReferenceOption.CASCADE)
-    val passwordHash = varchar("password_hash", 128)
-    val salt = varchar("salt", 64)
-    val createdAt = long("created_at")
-    override val primaryKey = PrimaryKey(login)
-}
-
 /**
  * Chats — both DMs and groups.
  * type: "dm" | "group"

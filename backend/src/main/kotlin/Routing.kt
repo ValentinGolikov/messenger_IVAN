@@ -8,9 +8,6 @@ import io.ktor.server.routing.*
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import java.security.MessageDigest
-import java.security.SecureRandom
-import java.util.Base64
 import java.util.UUID
 
 fun Application.configureRouting(authService: AuthService) {
@@ -34,78 +31,6 @@ fun Application.configureRouting(authService: AuthService) {
             }
 
             call.respond(AuthResponse(userId = userId, yandexData = yandexUser))
-        }
-
-        post("/auth/password/register") {
-            val params = call.receiveParameters()
-            val login = params["login"]?.normalizeLogin()
-                ?: return@post call.respond(HttpStatusCode.BadRequest, "Login is required")
-            val password = params["password"]
-                ?: return@post call.respond(HttpStatusCode.BadRequest, "Password is required")
-            val displayName = params["displayName"]?.trim()?.takeIf { it.isNotBlank() } ?: login
-
-            if (!isValidLogin(login) || password.length < 6) {
-                return@post call.respond(HttpStatusCode.BadRequest, "Invalid login or password")
-            }
-
-            val existing = DatabaseFactory.dbQuery {
-                PasswordAccounts.selectAll().where { PasswordAccounts.login eq login }.count() > 0
-            }
-            if (existing) return@post call.respond(HttpStatusCode.Conflict, "Login already exists")
-
-            val salt = newSalt()
-            val passwordHash = hashPassword(password, salt)
-            val now = System.currentTimeMillis()
-
-            val userId = DatabaseFactory.dbQuery {
-                val id = Users.insert {
-                    it[yandexId] = passwordUserExternalId(login)
-                    it[Users.displayName] = displayName.take(50)
-                    it[realName] = null
-                    it[email] = null
-                }[Users.id]
-
-                PasswordAccounts.insert {
-                    it[PasswordAccounts.login] = login
-                    it[PasswordAccounts.userId] = id
-                    it[PasswordAccounts.passwordHash] = passwordHash
-                    it[PasswordAccounts.salt] = salt
-                    it[createdAt] = now
-                }
-
-                id
-            }
-
-            call.respond(passwordAuthResponse(userId, displayName, login))
-        }
-
-        post("/auth/password/login") {
-            val params = call.receiveParameters()
-            val login = params["login"]?.normalizeLogin()
-                ?: return@post call.respond(HttpStatusCode.BadRequest, "Login is required")
-            val password = params["password"]
-                ?: return@post call.respond(HttpStatusCode.BadRequest, "Password is required")
-
-            val row = DatabaseFactory.dbQuery {
-                (PasswordAccounts innerJoin Users)
-                    .select(
-                        PasswordAccounts.login,
-                        PasswordAccounts.userId,
-                        PasswordAccounts.passwordHash,
-                        PasswordAccounts.salt,
-                        Users.displayName
-                    )
-                    .where { PasswordAccounts.login eq login }
-                    .singleOrNull()
-            } ?: return@post call.respond(HttpStatusCode.Unauthorized, "Invalid login or password")
-
-            val expectedHash = row[PasswordAccounts.passwordHash]
-            val actualHash = hashPassword(password, row[PasswordAccounts.salt])
-            if (actualHash != expectedHash) {
-                return@post call.respond(HttpStatusCode.Unauthorized, "Invalid login or password")
-            }
-
-            call.respond(passwordAuthResponse(row[PasswordAccounts.userId], row[Users.displayName], login))
         }
 
         // ── Users / Contacts ─────────────────────────────────────────────────
@@ -542,45 +467,6 @@ private fun getMutualContactIds(userId: Int): Set<Int> {
         .map { it[Contacts.userId] }.toSet()
 
     return added intersect addedMe
-}
-
-private fun String.normalizeLogin(): String? {
-    val normalized = trim().lowercase()
-    return normalized.takeIf { it.isNotBlank() }
-}
-
-private fun isValidLogin(login: String): Boolean {
-    return login.length in 3..50 && login.all { it.isLetterOrDigit() || it == '_' || it == '-' || it == '.' }
-}
-
-private fun newSalt(): String {
-    val bytes = ByteArray(16)
-    SecureRandom().nextBytes(bytes)
-    return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
-}
-
-private fun hashPassword(password: String, salt: String): String {
-    val digest = MessageDigest.getInstance("SHA-256")
-    val bytes = digest.digest("$salt:$password".toByteArray(Charsets.UTF_8))
-    return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
-}
-
-private fun passwordAuthResponse(userId: Int, displayName: String, login: String): PasswordAuthResponse {
-    return PasswordAuthResponse(
-        token = "password:${UUID.randomUUID()}",
-        user = PasswordUserDto(
-            id = userId,
-            name = displayName,
-            username = login,
-        )
-    )
-}
-
-private fun passwordUserExternalId(login: String): String {
-    val digest = MessageDigest.getInstance("SHA-256")
-    val hash = Base64.getUrlEncoder().withoutPadding()
-        .encodeToString(digest.digest(login.toByteArray(Charsets.UTF_8)))
-    return "pwd:${hash.take(24)}"
 }
 
 /** Finds existing DM between two users or creates a new one. Returns chatId. */

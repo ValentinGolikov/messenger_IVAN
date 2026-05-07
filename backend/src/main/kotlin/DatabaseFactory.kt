@@ -20,7 +20,6 @@ object DatabaseFactory {
         transaction {
             SchemaUtils.create(
                 Users,
-                PasswordAccounts,
                 Contacts,
                 Chats,
                 ChatParticipants,
