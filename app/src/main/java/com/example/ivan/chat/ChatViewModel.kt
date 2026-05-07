@@ -7,6 +7,8 @@ import com.example.ivan.BuildConfig
 import com.example.ivan.main.ChatMessage
 import com.example.ivan.main.MessageDto
 import com.example.ivan.main.NetworkClient
+import com.example.ivan.main.PinEvent
+import com.example.ivan.main.PinnedMessageDto
 import com.example.ivan.main.PresenceEvent
 import com.example.ivan.main.UserDto
 import com.example.ivan.main.WsEnvelope
@@ -37,6 +39,10 @@ class ChatViewModel(
     private val _otherUserOnline = MutableStateFlow(false)
     val otherUserOnline: StateFlow<Boolean> = _otherUserOnline
 
+    /** Currently pinned message (null = nothing pinned) */
+    private val _pinnedMessage = MutableStateFlow<PinnedMessageDto?>(null)
+    val pinnedMessage: StateFlow<PinnedMessageDto?> = _pinnedMessage
+
     /** ID of the other user in DM */
     var otherUserId: Int? = null
         private set
@@ -45,9 +51,11 @@ class ChatViewModel(
 
     init {
         loadHistory()
+        loadPinnedMessage()
         connectWebSocket()
         collectStatusUpdates()
         collectPresenceUpdates()
+        collectPinUpdates()
     }
 
     private fun loadHistory() {
@@ -63,6 +71,16 @@ class ChatViewModel(
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
+            }
+        }
+    }
+
+    private fun loadPinnedMessage() {
+        viewModelScope.launch {
+            try {
+                _pinnedMessage.value = NetworkClient.getPinnedMessage(chatId)
+            } catch (e: Exception) {
+                // non-critical
             }
         }
     }
@@ -126,6 +144,17 @@ class ChatViewModel(
         }
     }
 
+    /** Collect pin updates from WsManager */
+    private fun collectPinUpdates() {
+        viewModelScope.launch {
+            WsManager.pinUpdates.collect { event ->
+                if (event.chatId == chatId) {
+                    _pinnedMessage.value = event.pinnedMessage
+                }
+            }
+        }
+    }
+
     /** Set the other user ID (for DM chats) and load their online status */
     fun setOtherUser(otherId: Int?) {
         otherUserId = otherId
@@ -149,6 +178,30 @@ class ChatViewModel(
                 wsSession?.send(
                     Frame.Text(Json.encodeToString(ChatMessage.serializer(), msg))
                 )
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    /** Pin a message */
+    fun pinMessage(messageId: String) {
+        viewModelScope.launch {
+            try {
+                val pinned = NetworkClient.pinMessage(chatId, userId, messageId)
+                _pinnedMessage.value = pinned
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    /** Unpin the currently pinned message */
+    fun unpinMessage(messageId: String) {
+        viewModelScope.launch {
+            try {
+                NetworkClient.unpinMessage(chatId, userId, messageId)
+                _pinnedMessage.value = null
             } catch (e: Exception) {
                 e.printStackTrace()
             }

@@ -8,7 +8,6 @@ import kotlinx.coroutines.*
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.*
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * WebSocket endpoint: /chat/{userId}
@@ -24,10 +23,10 @@ import java.util.concurrent.ConcurrentHashMap
  *   WsEnvelope { type: "message",       payload: <MessageDto JSON> }
  *   WsEnvelope { type: "status_update", payload: <StatusUpdateEvent JSON> }
  *   WsEnvelope { type: "presence",      payload: <PresenceEvent JSON> }
+ *   WsEnvelope { type: "pin_update",    payload: <PinEvent JSON> }
  */
 fun Application.configureSockets() {
-    // userId → active WebSocket session
-    val connections = ConcurrentHashMap<Int, DefaultWebSocketServerSession>()
+    val connections = ConnectionManager.connections
 
     routing {
         webSocket("/chat/{userId}") {
@@ -162,7 +161,7 @@ fun Application.configureSockets() {
 private suspend fun handleReadAck(
     payload: String,
     readerUserId: Int,
-    connections: ConcurrentHashMap<Int, DefaultWebSocketServerSession>
+    connections: java.util.concurrent.ConcurrentHashMap<Int, DefaultWebSocketServerSession>
 ) {
     val ack = runCatching {
         Json.decodeFromString<ReadAckRequest>(payload)
@@ -196,7 +195,7 @@ private suspend fun handleReadAck(
  * who are currently connected.
  */
 private suspend fun broadcastPresence(
-    connections: ConcurrentHashMap<Int, DefaultWebSocketServerSession>,
+    connections: java.util.concurrent.ConcurrentHashMap<Int, DefaultWebSocketServerSession>,
     userId: Int,
     online: Boolean
 ) {

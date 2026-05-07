@@ -10,6 +10,7 @@ import io.ktor.client.plugins.logging.Logging
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.request.*
 import io.ktor.client.request.forms.FormDataContent
+import io.ktor.client.statement.*
 import io.ktor.http.Parameters
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.SerialName
@@ -138,6 +139,28 @@ data class ReadAckRequest(
     val lastMessageId: String
 )
 
+// ── Pinned messages ───────────────────────────────────────────────────────────
+
+/** Pinned message info returned by backend */
+@Serializable
+data class PinnedMessageDto(
+    val messageId: String,
+    val chatId: Int,
+    val senderId: Int,
+    val senderName: String,
+    val text: String,
+    val timestamp: Long,
+    val pinnedBy: Int,
+    val pinnedAt: Long
+)
+
+/** WebSocket event: a message was pinned or unpinned */
+@Serializable
+data class PinEvent(
+    val chatId: Int,
+    val pinnedMessage: PinnedMessageDto? // null = unpinned
+)
+
 // ── HTTP client singleton ─────────────────────────────────────────────────────
 
 object NetworkClient {
@@ -257,4 +280,29 @@ object NetworkClient {
                 append("targetId", targetId.toString())
             }))
         }.body()
+
+    // ── Pinned messages ───────────────────────────────────────────────────────
+
+    suspend fun pinMessage(chatId: Int, userId: Int, messageId: String): PinnedMessageDto =
+        httpClient.post(buildUrl("/chats/$chatId/pin")) {
+            setBody(FormDataContent(Parameters.build {
+                append("userId", userId.toString())
+                append("messageId", messageId)
+            }))
+        }.body()
+
+    suspend fun unpinMessage(chatId: Int, userId: Int, messageId: String) {
+        httpClient.delete(buildUrl("/chats/$chatId/pin")) {
+            setBody(FormDataContent(Parameters.build {
+                append("userId", userId.toString())
+                append("messageId", messageId)
+            }))
+        }
+    }
+
+    suspend fun getPinnedMessage(chatId: Int): PinnedMessageDto? {
+        val response = httpClient.get(buildUrl("/chats/$chatId/pin"))
+        return if (response.status.value == 204) null
+        else response.body()
+    }
 }

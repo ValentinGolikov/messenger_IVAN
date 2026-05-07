@@ -21,6 +21,7 @@ import com.yandex.authsdk.YandexAuthOptions
 import com.yandex.authsdk.YandexAuthResult
 import com.yandex.authsdk.YandexAuthSdk
 import com.yandex.authsdk.YandexAuthToken
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -32,7 +33,10 @@ class MainActivity : ComponentActivity() {
      * IMPORTANT: accessed only from the main thread after login completes.
      * We use a StateFlow so the Compose navigation can react when it changes.
      */
-    private val authState = kotlinx.coroutines.flow.MutableStateFlow<Int?>(null)
+    private val authState = MutableStateFlow<Int?>(null)
+
+    /** Deep link token received while app is already running */
+    private val pendingInviteToken = MutableStateFlow<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,6 +46,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val navController = rememberNavController()
             val userId = authState.collectAsState().value
+            val deepLinkToken = pendingInviteToken.collectAsState().value
 
             NavHost(navController = navController, startDestination = "splash") {
 
@@ -87,7 +92,10 @@ class MainActivity : ComponentActivity() {
                         chatTitle = title,
                         chatType = chatType,
                         otherUserId = otherUserId,
-                        onBack = { navController.popBackStack() }
+                        onBack = { navController.popBackStack() },
+                        onNavigateToJoin = { token ->
+                            navController.navigate("join/$token")
+                        }
                     )
                 }
 
@@ -125,6 +133,14 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+
+            // Handle deep link tokens arriving while already on a screen
+            androidx.compose.runtime.LaunchedEffect(deepLinkToken) {
+                if (deepLinkToken != null && userId != null) {
+                    navController.navigate("join/$deepLinkToken")
+                    pendingInviteToken.value = null
+                }
+            }
         }
 
         // Start login flow
@@ -140,6 +156,15 @@ class MainActivity : ComponentActivity() {
             } else {
                 launcher.launch(YandexAuthLoginOptions())
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val token = extractInviteToken(intent)
+        if (token != null) {
+            pendingInviteToken.value = token
         }
     }
 
@@ -187,9 +212,30 @@ class MainActivity : ComponentActivity() {
         launcher.launch(YandexAuthLoginOptions())
     }
 
-    // Deep link: ivan://join/{token}  or  https://ivan.example.com/join/{token}
+    /**
+     * Extract invite token from deep link intent.
+     *
+     * Supports:
+     * - ivan://join/{token}  → host="join", path="/{token}"
+     * - ivan://join/{token}  → host="join", path might be empty for short tokens
+     * - https://ivan.example.com/join/{token} → path="/join/{token}"
+     */
     private fun extractInviteToken(intent: Intent?): String? {
         val uri = intent?.data ?: return null
+
+        // Case 1: ivan://join/{token} → host = "join", path = "/{token}"
+        if (uri.scheme == "ivan" && uri.host == "join") {
+            val path = uri.path
+            return if (!path.isNullOrBlank() && path != "/") {
+                path.removePrefix("/")
+            } else {
+                // ivan://join/TOKEN might parse as host=join, path=/TOKEN
+                // or in some URI parsers as host=null, path=/join/TOKEN
+                null
+            }
+        }
+
+        // Case 2: https://domain/join/{token}
         val path = uri.path ?: return null
         return if (path.startsWith("/join/")) path.removePrefix("/join/") else null
     }

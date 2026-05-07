@@ -23,7 +23,8 @@ object DatabaseFactory {
                 Contacts,
                 Chats,
                 ChatParticipants,
-                ChatInvites
+                ChatInvites,
+                PinnedMessages
             )
         }
     }

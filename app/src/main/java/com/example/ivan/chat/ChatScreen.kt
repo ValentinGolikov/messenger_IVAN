@@ -3,7 +3,10 @@ package com.example.ivan.chat
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import com.example.ivan.R
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,16 +25,19 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ivan.main.MessageDto
+import com.example.ivan.main.PinnedMessageDto
 import com.example.ivan.main.UserDto
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ChatScreen(
     userId: Int,
@@ -39,7 +45,8 @@ fun ChatScreen(
     chatTitle: String,
     chatType: String = "dm",
     otherUserId: Int? = null,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onNavigateToJoin: ((token: String) -> Unit)? = null
 ) {
     val vm: ChatViewModel = viewModel(factory = ChatViewModel.Factory(userId, chatId))
     val messages by vm.messages.collectAsState()
@@ -50,7 +57,11 @@ fun ChatScreen(
     var showAddMemberSheet by remember { mutableStateOf(false) }
     val inviteToken by vm.inviteToken.collectAsState()
     val otherUserOnline by vm.otherUserOnline.collectAsState()
+    val pinnedMessage by vm.pinnedMessage.collectAsState()
     val context = LocalContext.current
+
+    // Context menu state for long-press on messages
+    var contextMenuMessage by remember { mutableStateOf<MessageDto?>(null) }
 
     // Set other user for presence tracking in DM
     LaunchedEffect(otherUserId) {
@@ -154,6 +165,23 @@ fun ChatScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            // ── Pinned message banner ─────────────────────────────────────────
+            pinnedMessage?.let { pinned ->
+                PinnedMessageBanner(
+                    pinned = pinned,
+                    onClickScroll = {
+                        // Find the message index and scroll to it
+                        val idx = messages.indexOfFirst { it.id == pinned.messageId }
+                        if (idx >= 0) {
+                            kotlinx.coroutines.MainScope().launch {
+                                listState.animateScrollToItem(idx)
+                            }
+                        }
+                    },
+                    onUnpin = { vm.unpinMessage(pinned.messageId) }
+                )
+            }
+
             LazyColumn(
                 state = listState,
                 modifier = Modifier
@@ -165,14 +193,51 @@ fun ChatScreen(
             ) {
                 items(messages, key = { it.id }) { message ->
                     // Check if it's a join-link message
-                    val isInviteMsg = message.text.startsWith("/join/")
-                    if (isInviteMsg) {
+                    val inviteMsgToken = extractInviteToken(message.text)
+                    if (inviteMsgToken != null) {
                         InviteLinkBubble(
                             message = message,
-                            isOwn = message.senderId == userId
+                            isOwn = message.senderId == userId,
+                            onTap = { onNavigateToJoin?.invoke(inviteMsgToken) }
                         )
                     } else {
-                        MessageBubble(message = message, isOwn = message.senderId == userId)
+                        // Wrap in Box with long-press for context menu
+                        Box {
+                            MessageBubble(
+                                message = message,
+                                isOwn = message.senderId == userId,
+                                isPinned = pinnedMessage?.messageId == message.id,
+                                onLongPress = { contextMenuMessage = message }
+                            )
+                            // Context menu dropdown
+                            DropdownMenu(
+                                expanded = contextMenuMessage?.id == message.id,
+                                onDismissRequest = { contextMenuMessage = null },
+                                offset = DpOffset(
+                                    x = if (message.senderId == userId) 100.dp else 0.dp,
+                                    y = 0.dp
+                                )
+                            ) {
+                                val isPinned = pinnedMessage?.messageId == message.id
+                                DropdownMenuItem(
+                                    text = { Text(if (isPinned) "Открепить" else "Закрепить") },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (isPinned) Icons.Default.Close else Icons.Default.Lock,
+                                            contentDescription = null
+                                        )
+                                    },
+                                    onClick = {
+                                        contextMenuMessage = null
+                                        if (isPinned) {
+                                            vm.unpinMessage(message.id)
+                                        } else {
+                                            vm.pinMessage(message.id)
+                                        }
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -276,6 +341,66 @@ fun ChatScreen(
     }
 }
 
+// ── Pinned message banner ────────────────────────────────────────────────────
+
+@Composable
+private fun PinnedMessageBanner(
+    pinned: PinnedMessageDto,
+    onClickScroll: () -> Unit,
+    onUnpin: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClickScroll),
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
+        shadowElevation = 1.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Pin icon
+            Icon(
+                imageVector = Icons.Default.Lock,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Закреплённое сообщение",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    pinned.text,
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            }
+            IconButton(
+                onClick = onUnpin,
+                modifier = Modifier.size(28.dp)
+            ) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Открепить",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+            }
+        }
+    }
+}
+
+// ── Add member sheet ─────────────────────────────────────────────────────────
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddMemberSheet(
@@ -347,8 +472,16 @@ private fun AddMemberSheet(
     }
 }
 
+// ── Message bubble ───────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun MessageBubble(message: MessageDto, isOwn: Boolean) {
+fun MessageBubble(
+    message: MessageDto,
+    isOwn: Boolean,
+    isPinned: Boolean = false,
+    onLongPress: (() -> Unit)? = null
+) {
     val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp))
 
     Column(
@@ -365,6 +498,10 @@ fun MessageBubble(message: MessageDto, isOwn: Boolean) {
         }
         Box(
             modifier = Modifier
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = { onLongPress?.invoke() }
+                )
                 .background(
                     color = if (isOwn) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.surfaceVariant,
@@ -378,6 +515,28 @@ fun MessageBubble(message: MessageDto, isOwn: Boolean) {
                 .widthIn(max = 280.dp)
         ) {
             Column {
+                // Pin indicator
+                if (isPinned) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(bottom = 2.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Lock,
+                            contentDescription = null,
+                            modifier = Modifier.size(12.dp),
+                            tint = if (isOwn) Color.White.copy(alpha = 0.8f)
+                            else MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            "Закреплено",
+                            fontSize = 10.sp,
+                            color = if (isOwn) Color.White.copy(alpha = 0.8f)
+                            else MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
                 Text(
                     text = message.text,
                     color = if (isOwn) Color.White else MaterialTheme.colorScheme.onSurface
@@ -426,13 +585,31 @@ fun MessageStatusIcon(status: String, tint: Color) {
     )
 }
 
+// ── Invite link bubble ───────────────────────────────────────────────────────
+
+/**
+ * Extract invite token from message text.
+ * Matches "/join/{token}" anywhere in the text.
+ */
+private fun extractInviteToken(text: String): String? {
+    val prefix = "/join/"
+    val idx = text.indexOf(prefix)
+    if (idx < 0) return null
+    val afterPrefix = text.substring(idx + prefix.length)
+    // Token is everything after /join/ up to the next space or end of string
+    return afterPrefix.split(" ", "\n").firstOrNull()?.takeIf { it.isNotBlank() }
+}
+
 /**
  * Special bubble for messages that contain an invite link (/join/<token>).
  * Shows a tappable card instead of raw text.
  */
 @Composable
-private fun InviteLinkBubble(message: MessageDto, isOwn: Boolean) {
-    val token = message.text.removePrefix("/join/")
+private fun InviteLinkBubble(
+    message: MessageDto,
+    isOwn: Boolean,
+    onTap: () -> Unit
+) {
     val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp))
 
     Column(
@@ -452,7 +629,9 @@ private fun InviteLinkBubble(message: MessageDto, isOwn: Boolean) {
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.secondaryContainer
             ),
-            modifier = Modifier.widthIn(max = 280.dp)
+            modifier = Modifier
+                .widthIn(max = 280.dp)
+                .clickable(onClick = onTap)
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

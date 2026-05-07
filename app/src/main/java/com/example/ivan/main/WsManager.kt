@@ -35,6 +35,10 @@ object WsManager {
     private val _presenceUpdates = MutableSharedFlow<PresenceEvent>(extraBufferCapacity = 64)
     val presenceUpdates: SharedFlow<PresenceEvent> = _presenceUpdates.asSharedFlow()
 
+    // Pin events (pin / unpin)
+    private val _pinUpdates = MutableSharedFlow<PinEvent>(extraBufferCapacity = 64)
+    val pinUpdates: SharedFlow<PinEvent> = _pinUpdates.asSharedFlow()
+
     // Текущая сессия — нужна для отправки сообщений
     private var session: io.ktor.client.plugins.websocket.ClientWebSocketSession? = null
 
@@ -74,6 +78,12 @@ object WsManager {
                                             Json.decodeFromString<PresenceEvent>(envelope.payload)
                                         }.getOrNull() ?: continue
                                         _presenceUpdates.emit(event)
+                                    }
+                                    "pin_update" -> {
+                                        val event = runCatching {
+                                            Json.decodeFromString<PinEvent>(envelope.payload)
+                                        }.getOrNull() ?: continue
+                                        _pinUpdates.emit(event)
                                     }
                                 }
                             }

@@ -120,7 +120,7 @@ data class JoinByInviteResponse(
  * Generic envelope sent over the WebSocket so the client can distinguish
  * message types without a separate connection per feature.
  *
- * type: "message" | "chat_created" | "user_added" | "status_update" | "presence" | "read_ack"
+ * type: "message" | "chat_created" | "user_added" | "status_update" | "presence" | "read_ack" | "pin_update"
  */
 @Serializable
 data class WsEnvelope(
@@ -148,4 +148,26 @@ data class PresenceEvent(
 data class ReadAckRequest(
     val chatId: Int,
     val lastMessageId: String
+)
+
+// ── Pinned messages ───────────────────────────────────────────────────────────
+
+/** Returned by GET /chats/{chatId}/pin and included in pin_update WS event */
+@Serializable
+data class PinnedMessageDto(
+    val messageId: String,
+    val chatId: Int,
+    val senderId: Int,
+    val senderName: String,
+    val text: String,
+    val timestamp: Long,
+    val pinnedBy: Int,
+    val pinnedAt: Long
+)
+
+/** WebSocket event: a message was pinned or unpinned */
+@Serializable
+data class PinEvent(
+    val chatId: Int,
+    val pinnedMessage: PinnedMessageDto? // null = unpinned
 )

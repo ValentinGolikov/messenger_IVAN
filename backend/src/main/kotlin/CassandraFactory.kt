@@ -86,6 +86,15 @@ object CassandraFactory {
         )
     }
 
+    /** Get a single message by chatId and messageId */
+    fun getMessageById(chatId: Int, messageId: UUID): CassandraMessage? {
+        val rs = session.execute(
+            "SELECT id, chat_id, sender_id, text, timestamp, status, is_deleted FROM messages WHERE chat_id = ? AND id = ?",
+            chatId, messageId
+        )
+        return rs.firstOrNull()?.toCassandraMessage()
+    }
+
     /** Mark all messages up to (and including) lastMessageId as read, for a specific sender */
     fun markMessagesAsRead(chatId: Int, lastMessageId: UUID, readerUserId: Int): List<Pair<UUID, Int>> {
         // Fetch messages up to lastMessageId that are not from the reader and not yet 'read'

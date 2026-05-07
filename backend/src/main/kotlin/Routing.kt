@@ -5,6 +5,7 @@ import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
@@ -436,10 +437,11 @@ fun Application.configureRouting(authService: AuthService) {
                         .single()[Users.displayName]
 
                     // Send the invite link as a system message in the DM (via Cassandra)
+                    // Format: plain /join/TOKEN so the client InviteLinkBubble can detect it
                     CassandraFactory.insertMessage(
                         chatId = dmChatId,
                         senderId = inviterId,
-                        text = "$inviterName приглашает вас в «$chatTitle»: /join/$inviteToken",
+                        text = "/join/$inviteToken",
                         timestamp = now
                     )
 
@@ -448,6 +450,113 @@ fun Application.configureRouting(authService: AuthService) {
             }
 
             call.respond(response)
+        }
+
+        // ── Pinned messages ──────────────────────────────────────────────────
+
+        /** Pin a message in a chat */
+        post("/chats/{chatId}/pin") {
+            val chatId = call.parameters["chatId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val params = call.receiveParameters()
+            val userId = params["userId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val messageId = params["messageId"]
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+
+            // Verify user is a participant
+            val isMember = DatabaseFactory.dbQuery {
+                ChatParticipants.selectAll()
+                    .where { (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq userId) }
+                    .count() > 0
+            }
+            if (!isMember) return@post call.respond(HttpStatusCode.Forbidden)
+
+            val now = System.currentTimeMillis()
+
+            // Remove any existing pin for this chat, then insert the new one
+            DatabaseFactory.dbQuery {
+                PinnedMessages.deleteWhere { PinnedMessages.chatId eq chatId }
+                PinnedMessages.insert {
+                    it[PinnedMessages.chatId] = chatId
+                    it[PinnedMessages.messageId] = messageId
+                    it[pinnedBy] = userId
+                    it[pinnedAt] = now
+                }
+            }
+
+            // Build DTO and broadcast via WS
+            val pinnedDto = buildPinnedMessageDto(chatId, messageId, userId, now)
+            if (pinnedDto != null) {
+                val event = PinEvent(chatId = chatId, pinnedMessage = pinnedDto)
+                val envelope = WsEnvelope(
+                    type = "pin_update",
+                    payload = Json.encodeToString(PinEvent.serializer(), event)
+                )
+                launch { ConnectionManager.broadcastToChat(chatId, envelope) }
+            }
+
+            call.respond(pinnedDto ?: HttpStatusCode.OK)
+        }
+
+        /** Unpin a message in a chat */
+        delete("/chats/{chatId}/pin") {
+            val chatId = call.parameters["chatId"]?.toIntOrNull()
+                ?: return@delete call.respond(HttpStatusCode.BadRequest)
+            val params = call.receiveParameters()
+            val userId = params["userId"]?.toIntOrNull()
+                ?: return@delete call.respond(HttpStatusCode.BadRequest)
+            val messageId = params["messageId"]
+                ?: return@delete call.respond(HttpStatusCode.BadRequest)
+
+            val isMember = DatabaseFactory.dbQuery {
+                ChatParticipants.selectAll()
+                    .where { (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq userId) }
+                    .count() > 0
+            }
+            if (!isMember) return@delete call.respond(HttpStatusCode.Forbidden)
+
+            DatabaseFactory.dbQuery {
+                PinnedMessages.deleteWhere {
+                    (PinnedMessages.chatId eq chatId) and (PinnedMessages.messageId eq messageId)
+                }
+            }
+
+            // Broadcast unpin
+            val event = PinEvent(chatId = chatId, pinnedMessage = null)
+            val envelope = WsEnvelope(
+                type = "pin_update",
+                payload = Json.encodeToString(PinEvent.serializer(), event)
+            )
+            launch { ConnectionManager.broadcastToChat(chatId, envelope) }
+
+            call.respond(HttpStatusCode.OK)
+        }
+
+        /** Get pinned message for a chat */
+        get("/chats/{chatId}/pin") {
+            val chatId = call.parameters["chatId"]?.toIntOrNull()
+                ?: return@get call.respond(HttpStatusCode.BadRequest)
+
+            val pinRow = DatabaseFactory.dbQuery {
+                PinnedMessages.selectAll()
+                    .where { PinnedMessages.chatId eq chatId }
+                    .singleOrNull()
+            }
+
+            if (pinRow == null) {
+                call.respond(HttpStatusCode.NoContent)
+                return@get
+            }
+
+            val dto = buildPinnedMessageDto(
+                chatId,
+                pinRow[PinnedMessages.messageId],
+                pinRow[PinnedMessages.pinnedBy],
+                pinRow[PinnedMessages.pinnedAt]
+            )
+            if (dto != null) call.respond(dto)
+            else call.respond(HttpStatusCode.NoContent)
         }
     }
 }
@@ -566,4 +675,33 @@ private fun getChatListForUser(userId: Int): List<ChatDto> {
             unreadCount = 0 // TODO: implement unread count via Cassandra
         )
     }
+}
+
+/**
+ * Build a PinnedMessageDto by fetching message data from Cassandra
+ * and sender name from PostgreSQL.
+ */
+private suspend fun buildPinnedMessageDto(
+    chatId: Int,
+    messageId: String,
+    pinnedBy: Int,
+    pinnedAt: Long
+): PinnedMessageDto? {
+    val uuid = try { UUID.fromString(messageId) } catch (_: Exception) { return null }
+    val msg = CassandraFactory.getMessageById(chatId, uuid) ?: return null
+    val senderName = DatabaseFactory.dbQuery {
+        Users.selectAll()
+            .where { Users.id eq msg.senderId }
+            .singleOrNull()?.get(Users.displayName) ?: "Unknown"
+    }
+    return PinnedMessageDto(
+        messageId = messageId,
+        chatId = chatId,
+        senderId = msg.senderId,
+        senderName = senderName,
+        text = msg.text,
+        timestamp = msg.timestamp,
+        pinnedBy = pinnedBy,
+        pinnedAt = pinnedAt
+    )
 }

@@ -68,3 +68,15 @@ object ChatInvites : Table("chat_invites") {
     val createdAt = long("created_at")
     override val primaryKey = PrimaryKey(id)
 }
+
+/**
+ * PinnedMessages — pinned message per chat.
+ * Each chat can have one pinned message at a time (latest pin wins).
+ */
+object PinnedMessages : Table("pinned_messages") {
+    val chatId = integer("chat_id").references(Chats.id, onDelete = ReferenceOption.CASCADE)
+    val messageId = varchar("message_id", 64) // TimeUUID as string
+    val pinnedBy = integer("pinned_by").references(Users.id)
+    val pinnedAt = long("pinned_at")
+    override val primaryKey = PrimaryKey(chatId, messageId)
+}
