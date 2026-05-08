@@ -55,6 +55,11 @@ export default function ChatArea({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
+  useEffect(() => {
+    if (!chat || chat.type !== 'group') return
+    onLoadGroupMembers?.(chat.id)
+  }, [chat, onLoadGroupMembers])
+
   if (!chat) {
     return (
       <div className="chat-area empty">
@@ -68,10 +73,6 @@ export default function ChatArea({
 
   const chatName = (getAlias && getAlias(chat.id)) || chat.name
   const myRole = (groupMembers || []).find(m => m.id === selfUserId)?.role || 'member'
-
-  useEffect(() => {
-    if (chat?.type === 'group') onLoadGroupMembers?.(chat.id)
-  }, [chat?.id, chat?.type, onLoadGroupMembers])
 
   function handleSend(e) {
     e?.preventDefault()
