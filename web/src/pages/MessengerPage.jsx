@@ -279,7 +279,12 @@ export default function MessengerPage() {
             if (current.some(m => m.id === msg.id)) return prev
 
             if (msg.from === 'me') {
-              const pendingIndex = [...current].reverse().findIndex(m => m.from === 'me' && m.status === 'pending' && m.text === msg.text)
+              const pendingIndex = [...current].reverse().findIndex(m =>
+                m.from === 'me' &&
+                String(m.id).startsWith('local-') &&
+                m.text === msg.text &&
+                m.status !== 'failed'
+              )
               if (pendingIndex !== -1) {
                 const realIndex = current.length - 1 - pendingIndex
                 const next = [...current]
@@ -448,12 +453,14 @@ export default function MessengerPage() {
       timestamp: Date.now(),
     }
     const sent = sendOrQueue(payload)
-    setMessages(prev => ({
-      ...prev,
-      [chatId]: (prev[chatId] || []).map(msg =>
-        msg.id === retryMessageId ? { ...msg, status: sent ? 'sent' : 'failed' } : msg
-      ),
-    }))
+    if (!sent) {
+      setMessages(prev => ({
+        ...prev,
+        [chatId]: (prev[chatId] || []).map(msg =>
+          msg.id === retryMessageId ? { ...msg, status: 'failed' } : msg
+        ),
+      }))
+    }
   }
 
   function handleRetryMessage(message) {
