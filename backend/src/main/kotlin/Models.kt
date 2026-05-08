@@ -123,7 +123,7 @@ data class JoinByInviteResponse(
  *
  * type: "message" | "chat_created" | "user_added" | "status_update"
  *     | "presence" | "read_ack" | "pin_update"
- *     | "message_deleted" | "chat_removed" | "owner_changed"
+ *     | "message_deleted" | "message_edited" | "chat_removed" | "owner_changed" | "typing"
  */
 @Serializable
 data class WsEnvelope(
@@ -208,6 +208,14 @@ data class MessageDeletedEvent(
     val messageId: String
 )
 
+/** WS event: a message was edited */
+@Serializable
+data class MessageEditedEvent(
+    val chatId: Int,
+    val messageId: String,
+    val text: String
+)
+
 /** WS event: chat removed (DM deleted for both / group deleted / user kicked) */
 @Serializable
 data class ChatRemovedEvent(
@@ -220,4 +228,12 @@ data class ChatRemovedEvent(
 data class OwnerChangedEvent(
     val chatId: Int,
     val newOwnerId: Int
+)
+
+/** WS event: typing indicator in a chat */
+@Serializable
+data class TypingEvent(
+    val chatId: Int,
+    val userId: Int,
+    val typing: Boolean
 )

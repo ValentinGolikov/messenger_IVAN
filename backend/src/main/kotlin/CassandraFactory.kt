@@ -121,6 +121,14 @@ object CassandraFactory {
         )
     }
 
+    /** Edit message text for all participants */
+    fun editMessageText(chatId: Int, messageId: UUID, newText: String) {
+        session.execute(
+            "UPDATE messages SET text = ? WHERE chat_id = ? AND id = ?",
+            newText, chatId, messageId
+        )
+    }
+
     /** Delete all messages in a chat (physically removes rows) */
     fun deleteAllChatMessages(chatId: Int) {
         session.execute(

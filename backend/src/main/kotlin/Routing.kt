@@ -62,6 +62,66 @@ fun Application.configureRouting(authService: AuthService) {
             call.respond(users)
         }
 
+        /** Global search across users, chats and recent messages */
+        get("/search/global") {
+            val query = call.request.queryParameters["q"]?.trim().orEmpty()
+            val userId = call.request.queryParameters["userId"]?.toIntOrNull()
+                ?: return@get call.respond(HttpStatusCode.BadRequest)
+            if (query.isBlank()) {
+                return@get call.respond(mapOf("users" to emptyList<UserDto>(), "chats" to emptyList<ChatDto>(), "messages" to emptyList<MessageDto>()))
+            }
+
+            val q = query.lowercase()
+            val result = DatabaseFactory.dbQuery {
+                val users = Users.selectAll()
+                    .where { (Users.displayName.lowerCase() like "%$q%") and (Users.id neq userId) }
+                    .limit(10)
+                    .map {
+                        UserDto(
+                            id = it[Users.id],
+                            displayName = it[Users.displayName],
+                            realName = it[Users.realName],
+                            isMutualContact = false
+                        )
+                    }
+
+                val myChats = getChatListForUser(userId)
+                val chatHits = myChats.filter { chat ->
+                    val name = (chat.title ?: chat.otherUserName ?: "").lowercase()
+                    name.contains(q)
+                }.take(10)
+
+                val messageHits = mutableListOf<MessageDto>()
+                myChats.forEach { chat ->
+                    if (messageHits.size >= 20) return@forEach
+                    val msgs = CassandraFactory.getMessages(chat.id, 200)
+                    msgs.filter { !it.isDeleted && it.text.lowercase().contains(q) }
+                        .take(5)
+                        .forEach { msg ->
+                            val senderName = if (msg.senderId == 0) "Система" else {
+                                Users.selectAll().where { Users.id eq msg.senderId }.singleOrNull()?.get(Users.displayName) ?: "Unknown"
+                            }
+                            messageHits.add(
+                                MessageDto(
+                                    id = msg.id.toString(),
+                                    chatId = msg.chatId,
+                                    senderId = msg.senderId,
+                                    senderName = senderName,
+                                    text = msg.text,
+                                    timestamp = msg.timestamp,
+                                    status = msg.status,
+                                    messageType = msg.messageType
+                                )
+                            )
+                        }
+                }
+
+                mapOf("users" to users, "chats" to chatHits, "messages" to messageHits.take(20))
+            }
+
+            call.respond(result)
+        }
+
         /** Add a contact (one-directional) */
         post("/contacts/add") {
             val params = call.receiveParameters()
@@ -405,15 +465,18 @@ fun Application.configureRouting(authService: AuthService) {
             val targetId = params["targetId"]?.toIntOrNull()
                 ?: return@post call.respond(HttpStatusCode.BadRequest)
 
-            // Verify inviter is a participant
-            val isMember = DatabaseFactory.dbQuery {
+            // Verify inviter has permission (owner/admin)
+            val canInvite = DatabaseFactory.dbQuery {
                 ChatParticipants.selectAll()
                     .where {
                         (ChatParticipants.chatId eq chatId) and
                                 (ChatParticipants.userId eq inviterId)
-                    }.count() > 0
+                    }
+                    .singleOrNull()
+                    ?.get(ChatParticipants.role)
+                    ?.let { it == "owner" || it == "admin" } == true
             }
-            if (!isMember) return@post call.respond(HttpStatusCode.Forbidden)
+            if (!canInvite) return@post call.respond(HttpStatusCode.Forbidden)
 
             val now = System.currentTimeMillis()
 
@@ -575,7 +638,37 @@ fun Application.configureRouting(authService: AuthService) {
             call.respond(dtos)
         }
 
-        // ── Message deletion ─────────────────────────────────────────────────
+        // ── Message edit / deletion ─────────────────────────────────────────
+
+        /** Edit own message text */
+        post("/chats/{chatId}/messages/{messageId}/edit") {
+            val chatId = call.parameters["chatId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val messageId = call.parameters["messageId"]
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val params = call.receiveParameters()
+            val userId = params["userId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val newText = params["text"]?.trim()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            if (newText.isBlank()) return@post call.respond(HttpStatusCode.BadRequest)
+
+            val uuid = try { UUID.fromString(messageId) } catch (_: Exception) { return@post call.respond(HttpStatusCode.BadRequest) }
+            val msg = CassandraFactory.getMessageById(chatId, uuid) ?: return@post call.respond(HttpStatusCode.NotFound)
+            if (msg.senderId != userId) return@post call.respond(HttpStatusCode.Forbidden)
+            if (msg.messageType != "text" || msg.isDeleted) return@post call.respond(HttpStatusCode.BadRequest)
+
+            CassandraFactory.editMessageText(chatId, uuid, newText)
+
+            val event = MessageEditedEvent(chatId = chatId, messageId = messageId, text = newText)
+            val envelope = WsEnvelope(
+                type = "message_edited",
+                payload = Json.encodeToString(MessageEditedEvent.serializer(), event)
+            )
+            launch { ConnectionManager.broadcastToChat(chatId, envelope) }
+
+            call.respond(HttpStatusCode.OK)
+        }
 
         /** Delete a message (for self or for all) */
         post("/chats/{chatId}/messages/{messageId}/delete") {
@@ -816,7 +909,7 @@ fun Application.configureRouting(authService: AuthService) {
             call.respond(members)
         }
 
-        /** Kick a member from a group (owner only) */
+        /** Kick a member from a group (owner/admin with role checks) */
         post("/chats/{chatId}/kick") {
             val chatId = call.parameters["chatId"]?.toIntOrNull()
                 ?: return@post call.respond(HttpStatusCode.BadRequest)
@@ -826,12 +919,24 @@ fun Application.configureRouting(authService: AuthService) {
             val targetId = params["targetId"]?.toIntOrNull()
                 ?: return@post call.respond(HttpStatusCode.BadRequest)
 
-            val isOwner = DatabaseFactory.dbQuery {
+            val requesterRole = DatabaseFactory.dbQuery {
                 ChatParticipants.selectAll()
-                    .where { (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq userId) and (ChatParticipants.role eq "owner") }
-                    .count() > 0
+                    .where { (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq userId) }
+                    .singleOrNull()?.get(ChatParticipants.role)
+            } ?: return@post call.respond(HttpStatusCode.Forbidden)
+
+            val targetRole = DatabaseFactory.dbQuery {
+                ChatParticipants.selectAll()
+                    .where { (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq targetId) }
+                    .singleOrNull()?.get(ChatParticipants.role)
+            } ?: return@post call.respond(HttpStatusCode.NotFound)
+
+            val canKick = when (requesterRole) {
+                "owner" -> targetRole != "owner"
+                "admin" -> targetRole == "member"
+                else -> false
             }
-            if (!isOwner) return@post call.respond(HttpStatusCode.Forbidden)
+            if (!canKick) return@post call.respond(HttpStatusCode.Forbidden)
 
             val targetName = DatabaseFactory.dbQuery {
                 Users.selectAll().where { Users.id eq targetId }.singleOrNull()?.get(Users.displayName) ?: "Unknown"
@@ -857,6 +962,36 @@ fun Application.configureRouting(authService: AuthService) {
             ConnectionManager.connections[targetId]?.send(
                 io.ktor.websocket.Frame.Text(Json.encodeToString(WsEnvelope.serializer(), kickEnvelope))
             )
+
+            call.respond(HttpStatusCode.OK)
+        }
+
+        /** Set group role (owner only): member/admin */
+        post("/chats/{chatId}/set-role") {
+            val chatId = call.parameters["chatId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val params = call.receiveParameters()
+            val userId = params["userId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val targetId = params["targetId"]?.toIntOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val role = params["role"]?.trim()
+                ?: return@post call.respond(HttpStatusCode.BadRequest)
+            if (role !in setOf("member", "admin")) return@post call.respond(HttpStatusCode.BadRequest)
+
+            val isOwner = DatabaseFactory.dbQuery {
+                ChatParticipants.selectAll()
+                    .where { (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq userId) and (ChatParticipants.role eq "owner") }
+                    .count() > 0
+            }
+            if (!isOwner) return@post call.respond(HttpStatusCode.Forbidden)
+
+            val updated = DatabaseFactory.dbQuery {
+                ChatParticipants.update({
+                    (ChatParticipants.chatId eq chatId) and (ChatParticipants.userId eq targetId) and (ChatParticipants.role neq "owner")
+                }) { it[ChatParticipants.role] = role }
+            }
+            if (updated == 0) return@post call.respond(HttpStatusCode.NotFound)
 
             call.respond(HttpStatusCode.OK)
         }

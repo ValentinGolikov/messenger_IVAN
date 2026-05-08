@@ -55,9 +55,15 @@ fun Application.configureSockets() {
                             Json.decodeFromString<WsEnvelope>(text)
                         }.getOrNull()
 
-                        if (envelope != null && envelope.type == "read_ack") {
-                            handleReadAck(envelope.payload, userId, connections)
-                            continue
+                        if (envelope != null) {
+                            if (envelope.type == "read_ack") {
+                                handleReadAck(envelope.payload, userId, connections)
+                                continue
+                            }
+                            if (envelope.type == "typing") {
+                                handleTyping(envelope.payload, userId)
+                                continue
+                            }
                         }
 
                         // Otherwise treat as ChatMessage
@@ -129,6 +135,7 @@ fun Application.configureSockets() {
                                     val statusEvent = StatusUpdateEvent(
                                         messageId = msgId.toString(),
                                         chatId = message.chatId,
+                                        senderId = userId,
                                         status = "delivered"
                                     )
                                     val statusEnvelope = Json.encodeToString(
@@ -159,6 +166,17 @@ fun Application.configureSockets() {
             }
         }
     }
+}
+
+private suspend fun handleTyping(payload: String, userId: Int) {
+    val event = runCatching { Json.decodeFromString<TypingEvent>(payload) }.getOrNull() ?: return
+    // Ignore spoofed userId in payload; trust socket user
+    val safeEvent = TypingEvent(chatId = event.chatId, userId = userId, typing = event.typing)
+    val envelope = WsEnvelope(
+        type = "typing",
+        payload = Json.encodeToString(TypingEvent.serializer(), safeEvent)
+    )
+    ConnectionManager.broadcastToChat(event.chatId, envelope)
 }
 
 /**
