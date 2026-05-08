@@ -123,6 +123,18 @@ export function apiSetGroupRole(chatId, userId, targetId, role) {
   })
 }
 
+export function apiGetInvite(token) {
+  return request(`/invites/${token}`)
+}
+
+export function apiJoinInvite(token, userId) {
+  return request(`/invites/${token}/join`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: encodeForm({ userId }),
+  })
+}
+
 export function getApiBaseUrl() {
   return API_URL
 }

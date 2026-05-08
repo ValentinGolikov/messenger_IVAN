@@ -211,9 +211,10 @@
 
 .message {
   display: flex;
-  animation-duration: 0.22s;
-  animation-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
+  animation-duration: 0.2s;
+  animation-timing-function: ease-out;
   animation-fill-mode: both;
+  transition: opacity 0.2s ease, transform 0.2s ease;
 }
 
 .message.me {
@@ -233,6 +234,7 @@
   font-size: 14px;
   line-height: 1.45;
   overflow-wrap: anywhere;
+  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .message-sender {
@@ -463,7 +465,7 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: background 0.15s, opacity 0.15s;
+  transition: background 0.18s ease-out, opacity 0.18s ease-out;
 }
 
 .send-btn:hover:not(:disabled) {
@@ -517,8 +519,80 @@
   font-size: 16px;
   color: var(--text);
   z-index: 5;
-  animation: slide-up 0.18s ease both;
-  transition: background 0.12s;
+  animation: slide-up 0.2s ease-out both;
+  transition: background 0.18s ease-out;
+}
+
+.invite-card {
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.28);
+  border-radius: 10px;
+  padding: 10px;
+  min-width: 220px;
+}
+
+.message.me .invite-card {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.invite-card-head {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.invite-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.invite-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.invite-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.invite-sub {
+  font-size: 12px;
+  opacity: 0.75;
+  margin-top: 2px;
+}
+
+.invite-card-actions {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.invite-join-btn {
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--blue);
+  color: #fff;
+  transition: background 0.18s ease-out, opacity 0.18s ease-out;
+}
+
+.invite-join-btn:hover:not(:disabled) {
+  background: var(--blue-hover);
+}
+
+.invite-join-btn:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.invite-error {
+  font-size: 11px;
+  color: #ef4444;
 }
 
 .scroll-to-bottom-btn:hover {

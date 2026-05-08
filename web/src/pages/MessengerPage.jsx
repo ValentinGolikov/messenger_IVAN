@@ -12,11 +12,13 @@ import {
   apiDeleteMessage,
   apiEditMessage,
   apiGetGroupMembers,
+  apiGetInvite,
   apiGetChats,
   apiGetMessagesForUser,
   apiGetPresence,
   apiGlobalSearch,
   apiInviteUserToGroup,
+  apiJoinInvite,
   apiSetGroupRole,
   apiSearchUsers,
   getApiBaseUrl,
@@ -131,6 +133,7 @@ export default function MessengerPage() {
   const navigate = useNavigate()
   const { chatId: chatIdParam } = useParams()
   const currentUser = user ? { ...user, online: isNetworkOnline } : user
+  const isMobileViewport = typeof window !== 'undefined' && window.matchMedia('(max-width: 720px)').matches
 
   const wsRef = useRef(null)
   const reconnectTimerRef = useRef(null)
@@ -139,12 +142,16 @@ export default function MessengerPage() {
   const activeChatIdRef = useRef(activeChatId)
   const chatsRef = useRef(chats)
   const settingsRef = useRef(settings)
+  const typingHideTimersRef = useRef({})
 
   const activeMessages = useMemo(() => messages[activeChatId] || [], [messages, activeChatId])
 
   useEffect(() => { activeChatIdRef.current = activeChatId }, [activeChatId])
   useEffect(() => { chatsRef.current = chats }, [chats])
   useEffect(() => { settingsRef.current = settings }, [settings])
+  useEffect(() => () => {
+    Object.values(typingHideTimersRef.current).forEach(t => clearTimeout(t))
+  }, [])
 
   useEffect(() => {
     if (!settings.notifications) return
@@ -186,6 +193,9 @@ export default function MessengerPage() {
         const savedChatId = loadActiveChatId(user.id)
         if (hasFromUrl) {
           setActiveChatId(fromUrl)
+        } else if (isMobileViewport) {
+          // On mobile root (/chat) should open chat list, not auto-enter a chat.
+          setActiveChatId(null)
         } else if (savedChatId && mapped.some(c => c.id === savedChatId)) {
           setActiveChatId(savedChatId)
         } else if (mapped.length) {
@@ -198,7 +208,7 @@ export default function MessengerPage() {
       }
     })()
     return () => { cancelled = true }
-  }, [user?.id, chatIdParam])
+  }, [user?.id, chatIdParam, isMobileViewport])
 
   useEffect(() => {
     const fromUrl = Number(chatIdParam)
@@ -239,6 +249,17 @@ export default function MessengerPage() {
     })()
     return () => { cancelled = true }
   }, [activeChatId, loadedChats, user?.id])
+
+  useEffect(() => {
+    if (!activeChatId) return
+    const chat = chats.find(c => c.id === activeChatId)
+    if (!chat || chat.type !== 'group') return
+    handleLoadGroupMembers(activeChatId).catch(() => {})
+    const t = setInterval(() => {
+      handleLoadGroupMembers(activeChatId).catch(() => {})
+    }, 25000)
+    return () => clearInterval(t)
+  }, [activeChatId, chats])
 
   useEffect(() => {
     if (!user?.id) return
@@ -367,14 +388,15 @@ export default function MessengerPage() {
 
         if (env.type === 'typing') {
           if (dto.userId === user.id) return
-          setTypingByChat(prev => ({
-            ...prev,
-            [dto.chatId]: dto.typing ? dto.userId : null,
-          }))
           if (dto.typing) {
-            setTimeout(() => {
+            if (typingHideTimersRef.current[dto.chatId]) {
+              clearTimeout(typingHideTimersRef.current[dto.chatId])
+            }
+            setTypingByChat(prev => ({ ...prev, [dto.chatId]: dto.userId }))
+          } else {
+            typingHideTimersRef.current[dto.chatId] = setTimeout(() => {
               setTypingByChat(prev => (prev[dto.chatId] === dto.userId ? { ...prev, [dto.chatId]: null } : prev))
-            }, 3500)
+            }, 900)
           }
         }
       } catch (err) {
@@ -582,6 +604,15 @@ export default function MessengerPage() {
     await handleLoadGroupMembers(chatId)
   }
 
+  async function handleJoinInvite(token) {
+    if (!user?.id) return
+    await apiGetInvite(token)
+    await apiJoinInvite(token, user.id)
+    const data = await apiGetChats(user.id)
+    const mapped = withContactAvatars((data || []).map(mapChat))
+    setChats(mapped)
+  }
+
   function handleTyping(chatId, typing) {
     const ws = wsRef.current
     if (!ws || ws.readyState !== WebSocket.OPEN) return
@@ -604,6 +635,10 @@ export default function MessengerPage() {
   }
 
   const activeChat = chats.find(c => c.id === activeChatId)
+  function handleBackToList() {
+    setActiveChatId(null)
+    navigate('/', { replace: true })
+  }
 
   return (
     <div className={`messenger ${activeChat ? 'mobile-chat-open' : ''}`}>
@@ -630,7 +665,7 @@ export default function MessengerPage() {
         chats={chats}
         onSend={handleSendMessage}
         onRetry={handleRetryMessage}
-        onBack={() => setActiveChatId(null)}
+        onBack={handleBackToList}
         onClearHistory={handleClearHistory}
         appearance={appearance}
         getAlias={getAlias}
@@ -646,6 +681,7 @@ export default function MessengerPage() {
         onLoadGroupMembers={handleLoadGroupMembers}
         onSetGroupRole={handleSetGroupRole}
         selfUserId={user?.id || null}
+        onJoinInvite={handleJoinInvite}
       />
 
       {showSettings && (

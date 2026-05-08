@@ -9,7 +9,7 @@ import '../styles/chat.css'
 export default function ChatArea({
   chat, messages, onSend, onRetry, onBack, onClearHistory, chats, appearance, getAlias, setAlias,
   onUpdateContactAvatar, onSearchUsers, onInviteToGroup, onEditMessage, onDeleteMessage, onTyping,
-  typingUserId, groupMembers, onLoadGroupMembers, onSetGroupRole, selfUserId,
+  typingUserId, groupMembers, onLoadGroupMembers, onSetGroupRole, selfUserId, onJoinInvite,
 }) {
   const [input, setInput]               = useState('')
   const [showEmoji, setShowEmoji]       = useState(false)
@@ -26,6 +26,7 @@ export default function ChatArea({
   const [inviteError, setInviteError] = useState('')
   const [invitingIds, setInvitingIds] = useState(new Set())
   const [showScrollBtn, setShowScrollBtn] = useState(false)
+  const [typingVisible, setTypingVisible] = useState(false)
   const messagesEndRef = useRef(null)
   const messagesRef    = useRef(null)
   const fileInputRef   = useRef(null)
@@ -73,6 +74,16 @@ export default function ChatArea({
 
   const chatName = (getAlias && getAlias(chat.id)) || chat.name
   const myRole = (groupMembers || []).find(m => m.id === selfUserId)?.role || 'member'
+  const onlineCount = (groupMembers || []).filter(m => m.online).length
+
+  useEffect(() => {
+    if (!typingUserId) {
+      const hideT = setTimeout(() => setTypingVisible(false), 700)
+      return () => clearTimeout(hideT)
+    }
+    const showT = setTimeout(() => setTypingVisible(true), 350)
+    return () => clearTimeout(showT)
+  }, [typingUserId])
 
   function handleSend(e) {
     e?.preventDefault()
@@ -87,6 +98,7 @@ export default function ChatArea({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       if (input.trim()) handleSend()
+      return
     }
     onTyping?.(chat.id, true)
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current)
@@ -251,7 +263,13 @@ export default function ChatArea({
               </div>
             </div>
           )}
-          {msg.file ? (
+          {isInviteMessage(msg.text) ? (
+            <InviteMessageCard
+              token={getInviteToken(msg.text)}
+              senderName={msg.senderName || 'Пользователь'}
+              onJoin={onJoinInvite}
+            />
+          ) : msg.file ? (
             <div className="file-attachment">
               <FileIcon />
               <div className="file-info">
@@ -312,9 +330,11 @@ export default function ChatArea({
               </span>
           </div>
             <span className="chat-header-status">
-              {typingUserId
+              {typingVisible
                 ? 'печатает...'
-                : (chat.type === 'group' ? `${chat.members?.length || 0} участников` : getPresenceCopy(chat))}
+                : (chat.type === 'group'
+                    ? `${groupMembers.length || chat.members?.length || 0} участников, ${onlineCount} онлайн`
+                    : getPresenceCopy(chat))}
             </span>
           </div>
         </button>
@@ -627,6 +647,51 @@ function getPresenceCopy(chat) {
   }
   return 'статус неизвестен'
 }
+
+function isInviteMessage(text) {
+  return typeof text === 'string' && text.startsWith('/join/')
+}
+
+function getInviteToken(text) {
+  return isInviteMessage(text) ? text.slice('/join/'.length).trim() : ''
+}
+
+function InviteMessageCard({ token, senderName, onJoin }) {
+  const [joining, setJoining] = useState(false)
+  const [state, setState] = useState('ready') // ready | joined | failed
+
+  async function handleJoin() {
+    if (!token || joining) return
+    try {
+      setJoining(true)
+      await onJoin?.(token)
+      setState('joined')
+    } catch {
+      setState('failed')
+    } finally {
+      setJoining(false)
+    }
+  }
+
+  return (
+    <div className="invite-card">
+      <div className="invite-card-head">
+        <span className="invite-icon">👥</span>
+        <div className="invite-meta">
+          <span className="invite-title">Приглашение в групповой чат</span>
+          <span className="invite-sub">{senderName} приглашает вас присоединиться</span>
+        </div>
+      </div>
+      <div className="invite-card-actions">
+        <button className="invite-join-btn" onClick={handleJoin} disabled={joining || state === 'joined'}>
+          {state === 'joined' ? 'Вы вступили' : (joining ? 'Вступаем...' : 'Вступить')}
+        </button>
+        {state === 'failed' && <span className="invite-error">Не удалось вступить</span>}
+      </div>
+    </div>
+  )
+}
+
 function DotsIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
