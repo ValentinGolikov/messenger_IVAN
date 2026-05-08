@@ -7,9 +7,11 @@ import { useAppearance } from '../hooks/useAppearance'
 import { useContactAliases } from '../hooks/useContactAliases'
 import { useNetworkStatus } from '../hooks/useNetworkStatus'
 import {
+  apiCreateGroup,
   apiCreateDm,
   apiGetChats,
   apiGetMessages,
+  apiInviteUserToGroup,
   apiSearchUsers,
   getApiBaseUrl,
 } from '../lib/api'
@@ -20,6 +22,30 @@ import AddChatModal from '../components/AddChatModal'
 import '../styles/messenger.css'
 
 const PENDING_KEY = 'pending_messages_v1'
+const ACTIVE_CHAT_KEY_PREFIX = 'active_chat_v1'
+
+function getActiveChatStorageKey(userId) {
+  if (!userId) return null
+  return `${ACTIVE_CHAT_KEY_PREFIX}:${location.origin}:${userId}`
+}
+
+function loadActiveChatId(userId) {
+  const key = getActiveChatStorageKey(userId)
+  if (!key) return null
+  const raw = localStorage.getItem(key)
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function saveActiveChatId(userId, chatId) {
+  const key = getActiveChatStorageKey(userId)
+  if (!key) return
+  if (chatId == null) {
+    localStorage.removeItem(key)
+    return
+  }
+  localStorage.setItem(key, String(chatId))
+}
 
 function formatMessageTime(ts) {
   return new Date(ts).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })
@@ -35,6 +61,7 @@ function mapChat(chat) {
     type: chat.type,
     name,
     username: chat.type === 'group' ? `group_${chat.id}` : `user_${chat.otherUserId ?? chat.id}`,
+    otherUserId: chat.type === 'dm' ? (chat.otherUserId ?? null) : null,
     email: '',
     lastMsg: chat.lastMessage?.text || '',
     time: chat.lastMessage ? formatMessageTime(chat.lastMessage.timestamp) : '',
@@ -78,7 +105,7 @@ function withContactAvatars(chats) {
 }
 
 export default function MessengerPage() {
-  const [activeChatId, setActiveChatId] = useState(null)
+  const [activeChatId, setActiveChatId] = useState(() => loadActiveChatId(null))
   const [chats, setChats] = useState([])
   const [messages, setMessages] = useState({})
   const [loadedChats, setLoadedChats] = useState(() => new Set())
@@ -86,7 +113,7 @@ export default function MessengerPage() {
   const [showAddChat, setShowAddChat] = useState(false)
 
   const { user, saveUser, clearUser, displayName } = useAuth()
-  const { theme, toggleTheme } = useTheme()
+  const { theme, setTheme } = useTheme()
   const { settings, update } = useSettings()
   const { appearance, updateAppearance, resetAppearance } = useAppearance()
   const { getAlias, setAlias } = useContactAliases()
@@ -98,8 +125,23 @@ export default function MessengerPage() {
   const reconnectTimerRef = useRef(null)
   const reconnectAttemptRef = useRef(0)
   const pendingQueueRef = useRef(loadPending())
+  const activeChatIdRef = useRef(activeChatId)
+  const chatsRef = useRef(chats)
+  const settingsRef = useRef(settings)
 
   const activeMessages = useMemo(() => messages[activeChatId] || [], [messages, activeChatId])
+
+  useEffect(() => { activeChatIdRef.current = activeChatId }, [activeChatId])
+  useEffect(() => { chatsRef.current = chats }, [chats])
+  useEffect(() => { settingsRef.current = settings }, [settings])
+
+  useEffect(() => {
+    if (!settings.notifications) return
+    if (typeof Notification === 'undefined') return
+    if (Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {})
+    }
+  }, [settings.notifications])
 
   useEffect(() => {
     if (!user?.id) return
@@ -110,13 +152,25 @@ export default function MessengerPage() {
         if (cancelled) return
         const mapped = withContactAvatars((data || []).map(mapChat))
         setChats(mapped)
-        if (!activeChatId && mapped.length) setActiveChatId(mapped[0].id)
+        const savedChatId = loadActiveChatId(user.id)
+        if (savedChatId && mapped.some(c => c.id === savedChatId)) {
+          setActiveChatId(savedChatId)
+        } else if (mapped.length) {
+          setActiveChatId(mapped[0].id)
+        } else {
+          setActiveChatId(null)
+        }
       } catch (err) {
         console.error('Failed to load chats:', err)
       }
     })()
     return () => { cancelled = true }
   }, [user?.id])
+
+  useEffect(() => {
+    if (!user?.id) return
+    saveActiveChatId(user.id, activeChatId)
+  }, [user?.id, activeChatId])
 
   useEffect(() => {
     if (!activeChatId || loadedChats.has(activeChatId)) return
@@ -183,6 +237,25 @@ export default function MessengerPage() {
             : c
           )
         })
+
+        const shouldNotify = (
+          settingsRef.current.notifications &&
+          msg.from !== 'me' &&
+          (document.hidden || activeChatIdRef.current !== msg.chatId) &&
+          typeof Notification !== 'undefined' &&
+          Notification.permission === 'granted'
+        )
+
+        if (shouldNotify) {
+          const chatTitle = chatsRef.current.find(c => c.id === msg.chatId)?.name || 'Новый чат'
+          const body = msg.text || 'Новое сообщение'
+          const n = new Notification(chatTitle, { body })
+          n.onclick = () => {
+            window.focus()
+            setActiveChatId(msg.chatId)
+            n.close()
+          }
+        }
       } catch (err) {
         console.error('WS parse error:', err)
       }
@@ -292,28 +365,25 @@ export default function MessengerPage() {
   async function handleAddChat(foundUser) {
     if (!user?.id) return
     if (foundUser.kind === 'group') {
-      const id = Date.now()
       const name = foundUser.name.trim()
-      const group = {
-        id,
-        type: 'group',
-        name,
-        username: `group_${id}`,
-        email: '',
-        lastMsg: '',
-        time: '',
-        unread: 0,
-        avatar: name[0]?.toUpperCase() || 'Г',
-        presenceStatus: 'unknown',
-        encryptionStatus: 'not_configured',
-        members: [
-          { id: user.id, name: displayName || 'Вы', avatar: (displayName || 'В')[0] },
-          ...foundUser.members,
-        ],
+      const created = await apiCreateGroup(user.id, name)
+      const chatId = created?.chatId
+      if (!chatId) return
+
+      // Best-effort: invite selected members to the group.
+      if (Array.isArray(foundUser.members) && foundUser.members.length > 0) {
+        await Promise.allSettled(
+          foundUser.members.map(member =>
+            apiInviteUserToGroup(chatId, user.id, member.id)
+          )
+        )
       }
-      setChats(prev => [...prev, group])
-      setMessages(prev => ({ ...prev, [id]: [] }))
-      setActiveChatId(id)
+
+      const data = await apiGetChats(user.id)
+      const mapped = withContactAvatars((data || []).map(mapChat))
+      setChats(mapped)
+      setMessages(prev => ({ ...prev, [chatId]: prev[chatId] || [] }))
+      setActiveChatId(chatId)
       return
     }
 
@@ -347,7 +417,7 @@ export default function MessengerPage() {
         user={currentUser}
         onLogout={handleLogout}
         theme={theme}
-        onToggleTheme={toggleTheme}
+        onThemeChange={setTheme}
         onShowSettings={() => setShowSettings(true)}
         onAddChat={() => setShowAddChat(true)}
         getAlias={getAlias}
@@ -375,7 +445,7 @@ export default function MessengerPage() {
           settings={settings}
           onUpdate={update}
           theme={theme}
-          onToggleTheme={toggleTheme}
+          onThemeChange={setTheme}
           onClose={() => setShowSettings(false)}
           appearance={appearance}
           onUpdateAppearance={updateAppearance}

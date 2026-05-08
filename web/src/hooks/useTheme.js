@@ -1,18 +1,23 @@
 import { useState, useEffect } from 'react'
 
 export function useTheme() {
-  const [theme, setTheme] = useState(
-    () => localStorage.getItem('theme') || 'light'
-  )
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'auto')
 
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme)
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const resolvedTheme = theme === 'auto'
+      ? (media.matches ? 'dark' : 'light')
+      : theme
+    document.documentElement.setAttribute('data-theme', resolvedTheme)
     localStorage.setItem('theme', theme)
+    if (theme !== 'auto') return
+
+    function handleSystemThemeChange(e) {
+      document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light')
+    }
+    media.addEventListener('change', handleSystemThemeChange)
+    return () => media.removeEventListener('change', handleSystemThemeChange)
   }, [theme])
 
-  function toggleTheme() {
-    setTheme(t => (t === 'light' ? 'dark' : 'light'))
-  }
-
-  return { theme, toggleTheme }
+  return { theme, setTheme }
 }

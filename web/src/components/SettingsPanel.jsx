@@ -2,13 +2,8 @@ import { useRef } from 'react'
 import '../styles/settings.css'
 
 const ZOOM_STEPS = [75, 90, 100, 110, 125, 150]
-const FONT_SIZES = [
-  { value: 'small',  label: 'Мелкий' },
-  { value: 'medium', label: 'Средний' },
-  { value: 'large',  label: 'Крупный' },
-]
 
-export default function SettingsPanel({ settings, onUpdate, theme, onToggleTheme, onClose, appearance, onUpdateAppearance, onResetAppearance }) {
+export default function SettingsPanel({ settings, onUpdate, theme, onThemeChange, onClose, appearance, onUpdateAppearance, onResetAppearance }) {
   const imgInputRef = useRef(null)
 
   function handleBgImageUpload(e) {
@@ -32,7 +27,7 @@ export default function SettingsPanel({ settings, onUpdate, theme, onToggleTheme
           {/* ── Внешний вид ── */}
           <Section title="Внешний вид">
             <Row label="Тема оформления">
-              <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+              <ThemeToggle theme={theme} onChange={onThemeChange} />
             </Row>
 
             <Row label={`Масштаб: ${settings.zoom}%`}>
@@ -66,19 +61,6 @@ export default function SettingsPanel({ settings, onUpdate, theme, onToggleTheme
               </div>
             </Row>
 
-            <Row label="Размер шрифта">
-              <div className="seg-control">
-                {FONT_SIZES.map(f => (
-                  <button
-                    key={f.value}
-                    className={settings.fontSize === f.value ? 'active' : ''}
-                    onClick={() => onUpdate('fontSize', f.value)}
-                  >
-                    {f.label}
-                  </button>
-                ))}
-              </div>
-            </Row>
           </Section>
 
           {/* ── Фон чата ── */}
@@ -164,12 +146,6 @@ export default function SettingsPanel({ settings, onUpdate, theme, onToggleTheme
 
           {/* ── Сообщения ── */}
           <Section title="Сообщения">
-            <Row label="Отправка по Enter">
-              <Toggle
-                value={settings.sendOnEnter}
-                onChange={v => onUpdate('sendOnEnter', v)}
-              />
-            </Row>
             <Row label="Уведомления">
               <Toggle
                 value={settings.notifications}
@@ -274,11 +250,12 @@ function Toggle({ value, onChange }) {
   )
 }
 
-function ThemeToggle({ theme, onToggle }) {
+function ThemeToggle({ theme, onChange }) {
   return (
-    <button className="theme-seg" onClick={onToggle}>
-      <span className={theme === 'light' ? 'active' : ''}>☀️ Светлая</span>
-      <span className={theme === 'dark' ? 'active' : ''}>🌙 Тёмная</span>
-    </button>
+    <div className="theme-seg" role="tablist" aria-label="Тема оформления">
+      <button className={theme === 'light' ? 'active' : ''} onClick={() => onChange('light')}>☀️ Светлая</button>
+      <button className={theme === 'dark' ? 'active' : ''} onClick={() => onChange('dark')}>🌙 Тёмная</button>
+      <button className={theme === 'auto' ? 'active' : ''} onClick={() => onChange('auto')}>🖥️ Авто</button>
+    </div>
   )
 }

@@ -64,6 +64,22 @@ export function apiCreateDm(userId, otherUserId) {
   })
 }
 
+export function apiCreateGroup(userId, title) {
+  return request('/chats/group', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: encodeForm({ userId, title }),
+  })
+}
+
+export function apiInviteUserToGroup(chatId, inviterId, targetId) {
+  return request(`/chats/${chatId}/invite-user`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: encodeForm({ inviterId, targetId }),
+  })
+}
+
 export function getApiBaseUrl() {
   return API_URL
 }

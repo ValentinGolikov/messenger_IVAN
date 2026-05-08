@@ -8,21 +8,33 @@ const DEFAULTS = {
   proxyPort: '',
   notifications: true,
   language: 'ru',
-  fontSize: 'medium',
-  sendOnEnter: true,
+}
+
+function sanitizeSettings(raw) {
+  if (!raw || typeof raw !== 'object') return { ...DEFAULTS }
+  return {
+    zoom: Number(raw.zoom) || DEFAULTS.zoom,
+    proxyEnabled: Boolean(raw.proxyEnabled),
+    proxyType: raw.proxyType || DEFAULTS.proxyType,
+    proxyHost: raw.proxyHost || DEFAULTS.proxyHost,
+    proxyPort: raw.proxyPort || DEFAULTS.proxyPort,
+    notifications: raw.notifications ?? DEFAULTS.notifications,
+    language: raw.language || DEFAULTS.language,
+  }
 }
 
 export function useSettings() {
   const [settings, setSettings] = useState(() => {
     try {
       const stored = localStorage.getItem('settings')
-      return stored ? { ...DEFAULTS, ...JSON.parse(stored) } : DEFAULTS
-    } catch { return DEFAULTS }
+      return stored ? sanitizeSettings(JSON.parse(stored)) : { ...DEFAULTS }
+    } catch { return { ...DEFAULTS } }
   })
 
   useEffect(() => {
-    localStorage.setItem('settings', JSON.stringify(settings))
-    document.documentElement.style.zoom = settings.zoom + '%'
+    localStorage.setItem('settings', JSON.stringify(sanitizeSettings(settings)))
+    const zoomFactor = Math.max(0.75, Math.min(1.5, settings.zoom / 100))
+    document.documentElement.style.setProperty('--app-zoom', String(zoomFactor))
   }, [settings])
 
   function update(key, value) {

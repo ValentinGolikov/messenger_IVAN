@@ -322,10 +322,6 @@ export default function ChatArea({ chat, messages, onSend, onRetry, onBack, onCl
             onKeyDown={handleKeyDown}
           />
 
-          {input.length > 0 && (
-            <span className="char-count">{input.length}</span>
-          )}
-
           <button type="submit" className="send-btn" disabled={!input.trim()}>
             <SendIcon />
           </button>

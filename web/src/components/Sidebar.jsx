@@ -1,11 +1,11 @@
-import { useState, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import ProfileModal from './ProfileModal'
 import ContextMenu from './ContextMenu'
 import '../styles/sidebar.css'
 
 export default function Sidebar({
   chats, activeChatId, onSelectChat,
-  user, onLogout, theme, onToggleTheme,
+  user, onLogout,
   onShowSettings, onAddChat,
   getAlias, setAlias, displayName, saveUser,
 }) {
@@ -29,13 +29,25 @@ export default function Sidebar({
     return [...pinnedList, ...unpinnedList]
   })()
 
+  const dmAliasByUserId = chats.reduce((acc, chat) => {
+    if (chat.type !== 'dm' || !chat.otherUserId || !getAlias) return acc
+    const alias = getAlias(chat.id)
+    if (alias) acc[chat.otherUserId] = alias
+    return acc
+  }, {})
+
   const filtered = orderedChats.filter(c => {
     const alias = getAlias ? getAlias(c.id) : ''
     return (
       c.name.toLowerCase().includes(search.toLowerCase()) ||
       c.username.toLowerCase().includes(search.toLowerCase()) ||
       alias.toLowerCase().includes(search.toLowerCase()) ||
-      c.members?.some(m => m.name.toLowerCase().includes(search.toLowerCase()))
+      c.members?.some(m => {
+        const memberName = (m.name || '').toLowerCase()
+        const memberAlias = (dmAliasByUserId[m.id] || '').toLowerCase()
+        const term = search.toLowerCase()
+        return memberName.includes(term) || memberAlias.includes(term)
+      })
     )
   })
 
@@ -112,9 +124,15 @@ export default function Sidebar({
     dragOverId.current = null
   }
 
-  // Keep orderedIds in sync when new chats are added externally
-  const knownIds = orderedIds
-  chats.forEach(c => { if (!knownIds.includes(c.id)) setOrderedIds(p => [...p, c.id]) })
+  // Keep orderedIds in sync when chats are added/removed externally
+  useEffect(() => {
+    setOrderedIds(prev => {
+      const incomingIds = chats.map(c => c.id)
+      const kept = prev.filter(id => incomingIds.includes(id))
+      const missing = incomingIds.filter(id => !kept.includes(id))
+      return [...kept, ...missing]
+    })
+  }, [chats])
 
   return (
     <>

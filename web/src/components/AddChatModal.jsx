@@ -6,12 +6,16 @@ export default function AddChatModal({ existingIds, onAdd, onClose, onSearch }) 
   const [mode, setMode] = useState('direct')
   const [groupName, setGroupName] = useState('')
   const [selectedIds, setSelectedIds] = useState(new Set())
+  const [selectedUsers, setSelectedUsers] = useState({})
   const [results, setResults] = useState([])
   const [loading, setLoading] = useState(false)
+  const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
 
-  const selectedMembers = results.filter(u => selectedIds.has(u.id))
-  const canCreateGroup = groupName.trim().length >= 2 && selectedMembers.length >= 2
+  const selectedMembers = Array.from(selectedIds)
+    .map(id => selectedUsers[id])
+    .filter(Boolean)
+  const canCreateGroup = groupName.trim().length >= 2
 
   async function handleQueryChange(value) {
     setQuery(value)
@@ -32,26 +36,42 @@ export default function AddChatModal({ existingIds, onAdd, onClose, onSearch }) 
     }
   }
 
-  function toggleMember(userId) {
+  function toggleMember(user) {
+    const userId = user.id
     setSelectedIds(prev => {
       const next = new Set(prev)
-      next.has(userId) ? next.delete(userId) : next.add(userId)
+      const willBeSelected = !next.has(userId)
+      if (willBeSelected) next.add(userId)
+      else next.delete(userId)
+      setSelectedUsers(prevUsers => {
+        if (willBeSelected) return { ...prevUsers, [userId]: user }
+        const nextUsers = { ...prevUsers }
+        delete nextUsers[userId]
+        return nextUsers
+      })
       return next
     })
   }
 
-  function handleCreateGroup() {
+  async function handleCreateGroup() {
     if (!canCreateGroup) return
-    onAdd({
-      kind: 'group',
-      name: groupName,
-      members: selectedMembers.map(u => ({
-        id: u.id,
-        name: u.name || u.displayName || `User ${u.id}`,
-        avatar: (u.name || u.displayName || '?')[0],
-      })),
-    })
-    onClose()
+    try {
+      setCreating(true)
+      await onAdd({
+        kind: 'group',
+        name: groupName,
+        members: selectedMembers.map(u => ({
+          id: u.id,
+          name: u.name || u.displayName || `User ${u.id}`,
+          avatar: (u.name || u.displayName || '?')[0],
+        })),
+      })
+      onClose()
+    } catch (err) {
+      setError(err.message || 'Не удалось создать группу')
+    } finally {
+      setCreating(false)
+    }
   }
 
   return (
@@ -80,7 +100,7 @@ export default function AddChatModal({ existingIds, onAdd, onClose, onSearch }) 
               onChange={e => setGroupName(e.target.value)}
             />
             <div className="add-selected-summary">
-              {selectedMembers.length > 0 ? `${selectedMembers.length} участника выбрано` : 'Выберите минимум 2 участников'}
+              {selectedMembers.length > 0 ? `${selectedMembers.length} участника выбрано` : 'Можно создать группу только с вами'}
             </div>
           </div>
         )}
@@ -99,7 +119,7 @@ export default function AddChatModal({ existingIds, onAdd, onClose, onSearch }) 
         </div>
 
         <div className="add-results">
-          {loading && <p className="add-hint">Поиск...</p>}
+          {(loading || creating) && <p className="add-hint">{creating ? 'Создание группы...' : 'Поиск...'}</p>}
           {error && <p className="add-empty">{error}</p>}
           {query && !loading && !error && results.length === 0 && (
             <p className="add-empty">Пользователи не найдены</p>
@@ -115,7 +135,7 @@ export default function AddChatModal({ existingIds, onAdd, onClose, onSearch }) 
               className={`add-user-item ${selectedIds.has(u.id) ? 'selected' : ''}`}
               onClick={() => {
                 if (mode === 'group') {
-                  toggleMember(u.id)
+                  toggleMember(u)
                   return
                 }
                 onAdd(u)
@@ -139,7 +159,7 @@ export default function AddChatModal({ existingIds, onAdd, onClose, onSearch }) 
         {mode === 'group' && (
           <div className="add-actions">
             <button className="add-cancel" onClick={onClose}>Отмена</button>
-            <button className="add-create" disabled={!canCreateGroup} onClick={handleCreateGroup}>
+            <button className="add-create" disabled={!canCreateGroup || creating} onClick={handleCreateGroup}>
               Создать группу
             </button>
           </div>

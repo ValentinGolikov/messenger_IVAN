@@ -130,13 +130,18 @@
   font-size: 13px;
 }
 
-.theme-seg span {
+.theme-seg button {
   padding: 6px 10px;
   color: var(--text-muted);
+  border-right: 1px solid var(--border);
   transition: background 0.1s, color 0.1s;
 }
 
-.theme-seg span.active {
+.theme-seg button:last-child {
+  border-right: none;
+}
+
+.theme-seg button.active {
   background: var(--blue);
   color: white;
 }
