@@ -6,17 +6,28 @@ import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransacti
 import org.jetbrains.exposed.sql.transactions.transaction
 
 object DatabaseFactory {
-    fun init() {
-        val dbUser = System.getenv("DB_USER")
-        val dbPassword = System.getenv("DB_PASSWORD")
-        val dbUrl = System.getenv("DB_URL")
+    private fun env(name: String): String? = System.getenv(name)?.takeIf { it.isNotBlank() }
 
-        Database.connect(
-            url = dbUrl,
-            driver = "org.postgresql.Driver",
-            user = dbUser,
-            password = dbPassword,
-        )
+    fun init() {
+        val dbUser = env("DB_USER") ?: env("POSTGRES_USER") ?: "postgres"
+        val dbPassword = env("DB_PASSWORD") ?: env("POSTGRES_PASSWORD") ?: "postgres"
+        val dbUrl = env("DB_URL") ?: run {
+            val host = env("DB_HOST") ?: "localhost"
+            val port = env("DB_PORT") ?: "5432"
+            val dbName = env("DB_NAME") ?: env("POSTGRES_DB") ?: "postgres"
+            "jdbc:postgresql://$host:$port/$dbName"
+        }
+
+        try {
+            Database.connect(
+                url = dbUrl,
+                driver = "org.postgresql.Driver",
+                user = dbUser,
+                password = dbPassword,
+            )
+        } catch (e: Exception) {
+            throw IllegalStateException("Failed to configure PostgreSQL connection. DB_URL=$dbUrl, DB_USER=$dbUser", e)
+        }
         transaction {
             SchemaUtils.createMissingTablesAndColumns(
                 Users,
