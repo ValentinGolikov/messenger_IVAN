@@ -22,6 +22,14 @@ export default function App() {
           </PrivateRoute>
         }
       />
+      <Route
+        path="/:chatId"
+        element={
+          <PrivateRoute>
+            <MessengerPage />
+          </PrivateRoute>
+        }
+      />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

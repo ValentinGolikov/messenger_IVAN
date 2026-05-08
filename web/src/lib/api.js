@@ -51,6 +51,11 @@ export function apiGetMessages(chatId) {
   return request(`/chats/${chatId}/messages`)
 }
 
+export function apiGetMessagesForUser(chatId, userId) {
+  const q = new URLSearchParams({ userId: String(userId) })
+  return request(`/chats/${chatId}/messages?${q.toString()}`)
+}
+
 export function apiSearchUsers(query, selfId) {
   const q = new URLSearchParams({ q: query, selfId: String(selfId) })
   return request(`/users/search?${q.toString()}`)
@@ -77,6 +82,44 @@ export function apiInviteUserToGroup(chatId, inviterId, targetId) {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: encodeForm({ inviterId, targetId }),
+  })
+}
+
+export function apiEditMessage(chatId, messageId, userId, text) {
+  return request(`/chats/${chatId}/messages/${messageId}/edit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: encodeForm({ userId, text }),
+  })
+}
+
+export function apiDeleteMessage(chatId, messageId, userId, forAll = false) {
+  return request(`/chats/${chatId}/messages/${messageId}/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: encodeForm({ userId, forAll }),
+  })
+}
+
+export function apiGlobalSearch(query, userId) {
+  const q = new URLSearchParams({ q: query, userId: String(userId) })
+  return request(`/search/global?${q.toString()}`)
+}
+
+export function apiGetPresence(ids) {
+  const q = new URLSearchParams({ ids: ids.join(',') })
+  return request(`/users/presence?${q.toString()}`)
+}
+
+export function apiGetGroupMembers(chatId) {
+  return request(`/chats/${chatId}/members`)
+}
+
+export function apiSetGroupRole(chatId, userId, targetId, role) {
+  return request(`/chats/${chatId}/set-role`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: encodeForm({ userId, targetId, role }),
   })
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
 import { useSettings } from '../hooks/useSettings'
@@ -9,9 +9,15 @@ import { useNetworkStatus } from '../hooks/useNetworkStatus'
 import {
   apiCreateGroup,
   apiCreateDm,
+  apiDeleteMessage,
+  apiEditMessage,
+  apiGetGroupMembers,
   apiGetChats,
-  apiGetMessages,
+  apiGetMessagesForUser,
+  apiGetPresence,
+  apiGlobalSearch,
   apiInviteUserToGroup,
+  apiSetGroupRole,
   apiSearchUsers,
   getApiBaseUrl,
 } from '../lib/api'
@@ -80,10 +86,11 @@ function mapMessage(msg, selfId) {
     from: msg.senderId === selfId ? 'me' : 'them',
     text: msg.text,
     time: formatMessageTime(msg.timestamp),
-    status: msg.senderId === selfId ? 'sent' : null,
+    status: msg.senderId === selfId ? (msg.status || 'sent') : null,
     timestamp: msg.timestamp,
     senderId: msg.senderId,
     senderName: msg.senderName || null,
+    edited: false,
   }
 }
 
@@ -111,6 +118,9 @@ export default function MessengerPage() {
   const [loadedChats, setLoadedChats] = useState(() => new Set())
   const [showSettings, setShowSettings] = useState(false)
   const [showAddChat, setShowAddChat] = useState(false)
+  const [groupMembers, setGroupMembers] = useState({})
+  const [typingByChat, setTypingByChat] = useState({})
+  const [globalSearchResults, setGlobalSearchResults] = useState([])
 
   const { user, saveUser, clearUser, displayName } = useAuth()
   const { theme, setTheme } = useTheme()
@@ -119,6 +129,7 @@ export default function MessengerPage() {
   const { getAlias, setAlias } = useContactAliases()
   const isNetworkOnline = useNetworkStatus()
   const navigate = useNavigate()
+  const { chatId: chatIdParam } = useParams()
   const currentUser = user ? { ...user, online: isNetworkOnline } : user
 
   const wsRef = useRef(null)
@@ -151,9 +162,31 @@ export default function MessengerPage() {
         const data = await apiGetChats(user.id)
         if (cancelled) return
         const mapped = withContactAvatars((data || []).map(mapChat))
-        setChats(mapped)
+        const dmUserIds = mapped
+          .filter(c => c.type === 'dm' && c.otherUserId)
+          .map(c => c.otherUserId)
+        if (dmUserIds.length > 0) {
+          try {
+            const presence = await apiGetPresence(dmUserIds)
+            const withPresence = mapped.map(c => {
+              if (c.type !== 'dm' || !c.otherUserId) return c
+              const p = presence?.[String(c.otherUserId)] || presence?.[c.otherUserId]
+              if (!p) return c
+              return { ...c, presenceStatus: p.online ? 'online' : 'offline', lastSeen: p.lastSeen || null }
+            })
+            setChats(withPresence)
+          } catch {
+            setChats(mapped)
+          }
+        } else {
+          setChats(mapped)
+        }
+        const fromUrl = Number(chatIdParam)
+        const hasFromUrl = Number.isFinite(fromUrl) && mapped.some(c => c.id === fromUrl)
         const savedChatId = loadActiveChatId(user.id)
-        if (savedChatId && mapped.some(c => c.id === savedChatId)) {
+        if (hasFromUrl) {
+          setActiveChatId(fromUrl)
+        } else if (savedChatId && mapped.some(c => c.id === savedChatId)) {
           setActiveChatId(savedChatId)
         } else if (mapped.length) {
           setActiveChatId(mapped[0].id)
@@ -165,7 +198,13 @@ export default function MessengerPage() {
       }
     })()
     return () => { cancelled = true }
-  }, [user?.id])
+  }, [user?.id, chatIdParam])
+
+  useEffect(() => {
+    const fromUrl = Number(chatIdParam)
+    if (!Number.isFinite(fromUrl)) return
+    if (fromUrl !== activeChatId) setActiveChatId(fromUrl)
+  }, [chatIdParam])
 
   useEffect(() => {
     if (!user?.id) return
@@ -173,12 +212,23 @@ export default function MessengerPage() {
   }, [user?.id, activeChatId])
 
   useEffect(() => {
+    const pathId = Number(chatIdParam)
+    if (activeChatId && activeChatId !== pathId) {
+      navigate(`/${activeChatId}`, { replace: true })
+      return
+    }
+    if (!activeChatId && chatIdParam) {
+      navigate('/', { replace: true })
+    }
+  }, [activeChatId, chatIdParam, navigate])
+
+  useEffect(() => {
     if (!activeChatId || loadedChats.has(activeChatId)) return
     if (!user?.id) return
     let cancelled = false
     ;(async () => {
       try {
-        const data = await apiGetMessages(activeChatId)
+        const data = await apiGetMessagesForUser(activeChatId, user.id)
         if (cancelled) return
         const mapped = (data || []).map(m => mapMessage(m, user.id))
         setMessages(prev => ({ ...prev, [activeChatId]: mapped }))
@@ -219,41 +269,107 @@ export default function MessengerPage() {
     ws.onmessage = (event) => {
       try {
         const env = JSON.parse(event.data)
-        if (env.type !== 'message') return
         const dto = typeof env.payload === 'string' ? JSON.parse(env.payload) : env.payload
-        const msg = mapMessage(dto, user.id)
 
-        setMessages(prev => {
-          const current = prev[msg.chatId] || []
-          if (current.some(m => m.id === msg.id)) return prev
-          return { ...prev, [msg.chatId]: [...current, msg] }
-        })
+        if (env.type === 'message') {
+          const msg = mapMessage(dto, user.id)
 
-        setChats(prev => {
-          const found = prev.find(c => c.id === msg.chatId)
-          if (!found) return prev
-          return prev.map(c => c.id === msg.chatId
-            ? { ...c, lastMsg: msg.text, time: msg.time }
-            : c
+          setMessages(prev => {
+            const current = prev[msg.chatId] || []
+            if (current.some(m => m.id === msg.id)) return prev
+
+            if (msg.from === 'me') {
+              const pendingIndex = [...current].reverse().findIndex(m => m.from === 'me' && m.status === 'pending' && m.text === msg.text)
+              if (pendingIndex !== -1) {
+                const realIndex = current.length - 1 - pendingIndex
+                const next = [...current]
+                next[realIndex] = { ...msg, status: 'sent' }
+                return { ...prev, [msg.chatId]: next }
+              }
+            }
+
+            return { ...prev, [msg.chatId]: [...current, msg] }
+          })
+
+          setChats(prev => {
+            const found = prev.find(c => c.id === msg.chatId)
+            if (!found) return prev
+            return prev.map(c => c.id === msg.chatId
+              ? { ...c, lastMsg: msg.text, time: msg.time }
+              : c
+            )
+          })
+
+          const shouldNotify = (
+            settingsRef.current.notifications &&
+            msg.from !== 'me' &&
+            (document.hidden || activeChatIdRef.current !== msg.chatId) &&
+            typeof Notification !== 'undefined' &&
+            Notification.permission === 'granted'
           )
-        })
 
-        const shouldNotify = (
-          settingsRef.current.notifications &&
-          msg.from !== 'me' &&
-          (document.hidden || activeChatIdRef.current !== msg.chatId) &&
-          typeof Notification !== 'undefined' &&
-          Notification.permission === 'granted'
-        )
+          if (shouldNotify) {
+            const chatTitle = chatsRef.current.find(c => c.id === msg.chatId)?.name || 'Новый чат'
+            const body = msg.text || 'Новое сообщение'
+            const n = new Notification(chatTitle, { body })
+            n.onclick = () => {
+              window.focus()
+              setActiveChatId(msg.chatId)
+              n.close()
+            }
+          }
+          return
+        }
 
-        if (shouldNotify) {
-          const chatTitle = chatsRef.current.find(c => c.id === msg.chatId)?.name || 'Новый чат'
-          const body = msg.text || 'Новое сообщение'
-          const n = new Notification(chatTitle, { body })
-          n.onclick = () => {
-            window.focus()
-            setActiveChatId(msg.chatId)
-            n.close()
+        if (env.type === 'status_update') {
+          setMessages(prev => {
+            const current = prev[dto.chatId] || []
+            return {
+              ...prev,
+              [dto.chatId]: current.map(m => m.id === dto.messageId ? { ...m, status: dto.status } : m),
+            }
+          })
+          return
+        }
+
+        if (env.type === 'message_deleted') {
+          setMessages(prev => {
+            const current = prev[dto.chatId] || []
+            return { ...prev, [dto.chatId]: current.filter(m => m.id !== dto.messageId) }
+          })
+          return
+        }
+
+        if (env.type === 'message_edited') {
+          setMessages(prev => {
+            const current = prev[dto.chatId] || []
+            return {
+              ...prev,
+              [dto.chatId]: current.map(m => m.id === dto.messageId ? { ...m, text: dto.text, edited: true } : m),
+            }
+          })
+          setChats(prev => prev.map(c => c.id === dto.chatId ? { ...c, lastMsg: dto.text } : c))
+          return
+        }
+
+        if (env.type === 'presence') {
+          setChats(prev => prev.map(c => {
+            if (c.type !== 'dm' || c.otherUserId !== dto.userId) return c
+            return { ...c, presenceStatus: dto.online ? 'online' : 'offline', lastSeen: dto.lastSeen || null }
+          }))
+          return
+        }
+
+        if (env.type === 'typing') {
+          if (dto.userId === user.id) return
+          setTypingByChat(prev => ({
+            ...prev,
+            [dto.chatId]: dto.typing ? dto.userId : null,
+          }))
+          if (dto.typing) {
+            setTimeout(() => {
+              setTypingByChat(prev => (prev[dto.chatId] === dto.userId ? { ...prev, [dto.chatId]: null } : prev))
+            }, 3500)
           }
         }
       } catch (err) {
@@ -345,9 +461,38 @@ export default function MessengerPage() {
     handleSendMessage(message.text, message.file, activeChatId, message.replyTo, message.id)
   }
 
+  useEffect(() => {
+    if (!user?.id || !activeChatId) return
+    const current = messages[activeChatId] || []
+    const lastIncoming = [...current].reverse().find(m => m.from !== 'me' && !String(m.id).startsWith('local-'))
+    if (!lastIncoming) return
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({
+      type: 'read_ack',
+      payload: JSON.stringify({ chatId: activeChatId, lastMessageId: lastIncoming.id }),
+    }))
+  }, [messages, activeChatId, user?.id])
+
   function handleClearHistory() {
     if (!activeChatId) return
     setMessages(prev => ({ ...prev, [activeChatId]: [] }))
+  }
+
+  async function handleEditMessage(chatId, messageId, text) {
+    if (!user?.id) return
+    await apiEditMessage(chatId, messageId, user.id, text)
+  }
+
+  async function handleDeleteMessage(chatId, messageId, forAll) {
+    if (!user?.id) return
+    await apiDeleteMessage(chatId, messageId, user.id, forAll)
+    if (!forAll) {
+      setMessages(prev => ({
+        ...prev,
+        [chatId]: (prev[chatId] || []).filter(m => m.id !== messageId),
+      }))
+    }
   }
 
   async function handleSearchUsers(query) {
@@ -360,6 +505,22 @@ export default function MessengerPage() {
       avatar: (u.displayName || '?')[0],
       presenceStatus: 'unknown',
     }))
+  }
+
+  async function handleGlobalSearch(query) {
+    if (!user?.id || !query.trim()) {
+      setGlobalSearchResults([])
+      return []
+    }
+    try {
+      const res = await apiGlobalSearch(query.trim(), user.id)
+      const chats = (res?.chats || []).map(mapChat)
+      setGlobalSearchResults(chats)
+      return chats
+    } catch {
+      setGlobalSearchResults([])
+      return []
+    }
   }
 
   async function handleAddChat(foundUser) {
@@ -394,6 +555,35 @@ export default function MessengerPage() {
     if (dm?.chatId) setActiveChatId(dm.chatId)
   }
 
+  async function handleInviteToGroup(chatId, targetId) {
+    if (!user?.id) return
+    await apiInviteUserToGroup(chatId, user.id, targetId)
+    const data = await apiGetChats(user.id)
+    const mapped = withContactAvatars((data || []).map(mapChat))
+    setChats(mapped)
+  }
+
+  async function handleLoadGroupMembers(chatId) {
+    const members = await apiGetGroupMembers(chatId)
+    setGroupMembers(prev => ({ ...prev, [chatId]: members || [] }))
+    return members || []
+  }
+
+  async function handleSetGroupRole(chatId, targetId, role) {
+    if (!user?.id) return
+    await apiSetGroupRole(chatId, user.id, targetId, role)
+    await handleLoadGroupMembers(chatId)
+  }
+
+  function handleTyping(chatId, typing) {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify({
+      type: 'typing',
+      payload: JSON.stringify({ chatId, userId: user?.id, typing }),
+    }))
+  }
+
   function handleUpdateContactAvatar(chatId, dataUrl) {
     setChats(prev => prev.map(c => c.id === chatId ? { ...c, customAvatar: dataUrl } : c))
     try {
@@ -411,7 +601,7 @@ export default function MessengerPage() {
   return (
     <div className={`messenger ${activeChat ? 'mobile-chat-open' : ''}`}>
       <Sidebar
-        chats={chats}
+        chats={globalSearchResults.length > 0 ? globalSearchResults : chats}
         activeChatId={activeChatId}
         onSelectChat={setActiveChatId}
         user={currentUser}
@@ -424,6 +614,7 @@ export default function MessengerPage() {
         setAlias={setAlias}
         displayName={displayName}
         saveUser={saveUser}
+        onGlobalSearch={handleGlobalSearch}
       />
 
       <ChatArea
@@ -438,6 +629,16 @@ export default function MessengerPage() {
         getAlias={getAlias}
         setAlias={setAlias}
         onUpdateContactAvatar={handleUpdateContactAvatar}
+        onSearchUsers={handleSearchUsers}
+        onInviteToGroup={handleInviteToGroup}
+        onEditMessage={handleEditMessage}
+        onDeleteMessage={handleDeleteMessage}
+        onTyping={handleTyping}
+        typingUserId={typingByChat[activeChatId] || null}
+        groupMembers={groupMembers[activeChatId] || []}
+        onLoadGroupMembers={handleLoadGroupMembers}
+        onSetGroupRole={handleSetGroupRole}
+        selfUserId={user?.id || null}
       />
 
       {showSettings && (

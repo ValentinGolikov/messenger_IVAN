@@ -7,7 +7,7 @@ export default function Sidebar({
   chats, activeChatId, onSelectChat,
   user, onLogout,
   onShowSettings, onAddChat,
-  getAlias, setAlias, displayName, saveUser,
+  getAlias, setAlias, displayName, saveUser, onGlobalSearch,
 }) {
   const [search, setSearch]         = useState('')
   const [showProfile, setShowProfile] = useState(false)
@@ -171,7 +171,11 @@ export default function Sidebar({
             type="text"
             placeholder="Поиск по имени или @username..."
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={e => {
+              const value = e.target.value
+              setSearch(value)
+              onGlobalSearch?.(value)
+            }}
           />
           {search && (
             <button className="search-clear" onClick={() => setSearch('')}>✕</button>
