@@ -61,6 +61,15 @@ export default function ChatArea({
     onLoadGroupMembers?.(chat.id)
   }, [chat, onLoadGroupMembers])
 
+  useEffect(() => {
+    if (!chat || !typingUserId) {
+      const hideT = setTimeout(() => setTypingVisible(false), 700)
+      return () => clearTimeout(hideT)
+    }
+    const showT = setTimeout(() => setTypingVisible(true), 350)
+    return () => clearTimeout(showT)
+  }, [chat, typingUserId])
+
   if (!chat) {
     return (
       <div className="chat-area empty">
@@ -75,15 +84,6 @@ export default function ChatArea({
   const chatName = (getAlias && getAlias(chat.id)) || chat.name
   const myRole = (groupMembers || []).find(m => m.id === selfUserId)?.role || 'member'
   const onlineCount = (groupMembers || []).filter(m => m.online).length
-
-  useEffect(() => {
-    if (!typingUserId) {
-      const hideT = setTimeout(() => setTypingVisible(false), 700)
-      return () => clearTimeout(hideT)
-    }
-    const showT = setTimeout(() => setTypingVisible(true), 350)
-    return () => clearTimeout(showT)
-  }, [typingUserId])
 
   function handleSend(e) {
     e?.preventDefault()
