@@ -51,6 +51,10 @@ object WsManager {
     private val _ownerChanged = MutableSharedFlow<OwnerChangedEvent>(extraBufferCapacity = 64)
     val ownerChanged: SharedFlow<OwnerChangedEvent> = _ownerChanged.asSharedFlow()
 
+    // Local event when we send a read ack
+    private val _chatReadLocally = MutableSharedFlow<Int>(extraBufferCapacity = 64)
+    val chatReadLocally: SharedFlow<Int> = _chatReadLocally.asSharedFlow()
+
     // Текущая сессия — нужна для отправки сообщений
     private var session: io.ktor.client.plugins.websocket.ClientWebSocketSession? = null
 
@@ -141,6 +145,7 @@ object WsManager {
                     payload = Json.encodeToString(ReadAckRequest.serializer(), ack)
                 )
                 session?.send(Frame.Text(Json.encodeToString(WsEnvelope.serializer(), envelope)))
+                _chatReadLocally.emit(chatId)
             } catch (e: Exception) {
                 e.printStackTrace()
             }

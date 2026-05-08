@@ -38,6 +38,14 @@ class ChatsViewModel(private val userId: Int) : ViewModel() {
     private val _lastSeenMap = MutableStateFlow<Map<Int, Long?>>(emptyMap())
     val lastSeenMap: StateFlow<Map<Int, Long?>> = _lastSeenMap
 
+    private fun updateChats(chats: List<ChatDto>) {
+        val sortedChats = chats.sortedWith(
+            compareByDescending<ChatDto> { it.unreadCount > 0 }
+                .thenByDescending { it.lastMessage?.timestamp ?: 0L }
+        )
+        _uiState.value = ChatsUiState.Success(sortedChats)
+    }
+
     init {
         loadChats()
         loadContacts()
@@ -46,6 +54,7 @@ class ChatsViewModel(private val userId: Int) : ViewModel() {
         collectIncomingMessages()
         collectMessageDeleted()
         collectStatusUpdates()
+        collectLocalReadEvents()
     }
 
     fun loadChats() {
@@ -53,7 +62,7 @@ class ChatsViewModel(private val userId: Int) : ViewModel() {
             _uiState.value = ChatsUiState.Loading
             try {
                 val chats = NetworkClient.getChats(userId)
-                _uiState.value = ChatsUiState.Success(chats)
+                updateChats(chats)
 
                 // Load presence (online + lastSeen) for DM chat partners
                 val dmPartnerIds = chats
@@ -100,9 +109,7 @@ class ChatsViewModel(private val userId: Int) : ViewModel() {
             WsManager.chatRemoved.collect { event ->
                 val current = _uiState.value
                 if (current is ChatsUiState.Success) {
-                    _uiState.value = ChatsUiState.Success(
-                        current.chats.filter { it.id != event.chatId }
-                    )
+                    updateChats(current.chats.filter { it.id != event.chatId })
                 }
             }
         }
@@ -125,7 +132,7 @@ class ChatsViewModel(private val userId: Int) : ViewModel() {
                         unreadCount = newUnread
                     )
                 }
-                _uiState.value = ChatsUiState.Success(updatedChats)
+                updateChats(updatedChats)
             }
         }
     }
@@ -149,21 +156,49 @@ class ChatsViewModel(private val userId: Int) : ViewModel() {
 
     /**
      * Collect status update events (read/delivered).
-     * Updates unreadCount when messages are read.
+     * Updates unreadCount and last message status.
      */
     private fun collectStatusUpdates() {
         viewModelScope.launch {
             WsManager.statusUpdates.collect { event ->
                 val current = _uiState.value as? ChatsUiState.Success ?: return@collect
                 val chat = current.chats.find { it.id == event.chatId } ?: return@collect
-                // If the read message is from someone else (not me), decrement unreadCount
-                if (event.status == "read" && event.senderId != userId) {
-                    val newUnread = maxOf(0, chat.unreadCount - 1)
-                    val updatedChats = current.chats.map { c ->
-                        if (c.id == chat.id) c.copy(unreadCount = newUnread) else c
-                    }
-                    _uiState.value = ChatsUiState.Success(updatedChats)
+
+                val updatedLastMessage = if (chat.lastMessage?.id == event.messageId) {
+                    chat.lastMessage.copy(status = event.status)
+                } else if (event.status == "read" && chat.lastMessage?.senderId == event.senderId) {
+                    chat.lastMessage.copy(status = "read")
+                } else {
+                    chat.lastMessage
                 }
+
+                // If the read message is from someone else (not me), reset unreadCount
+                val newUnread = if (event.status == "read" && event.senderId != userId) {
+                    0
+                } else {
+                    chat.unreadCount
+                }
+
+                val updatedChats = current.chats.map { c ->
+                    if (c.id == chat.id) c.copy(unreadCount = newUnread, lastMessage = updatedLastMessage) else c
+                }
+                updateChats(updatedChats)
+            }
+        }
+    }
+
+    /**
+     * Clear unread count locally when we send a read acknowledgment.
+     * This ensures the counter updates instantly even if the server doesn't echo a status_update back to the reader.
+     */
+    private fun collectLocalReadEvents() {
+        viewModelScope.launch {
+            WsManager.chatReadLocally.collect { chatId ->
+                val current = _uiState.value as? ChatsUiState.Success ?: return@collect
+                val updatedChats = current.chats.map { chat ->
+                    if (chat.id == chatId) chat.copy(unreadCount = 0) else chat
+                }
+                updateChats(updatedChats)
             }
         }
     }
@@ -232,9 +267,7 @@ class ChatsViewModel(private val userId: Int) : ViewModel() {
                 // Remove from local list
                 val current = _uiState.value
                 if (current is ChatsUiState.Success) {
-                    _uiState.value = ChatsUiState.Success(
-                        current.chats.filter { it.id != chatId }
-                    )
+                    updateChats(current.chats.filter { it.id != chatId })
                 }
             } catch (e: Exception) { /* ignore */ }
         }

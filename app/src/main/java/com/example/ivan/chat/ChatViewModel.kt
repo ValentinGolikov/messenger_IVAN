@@ -134,10 +134,17 @@ class ChatViewModel(
         viewModelScope.launch {
             WsManager.statusUpdates.collect { event ->
                 if (event.chatId == chatId) {
-                    _messages.value = _messages.value.map { msg ->
-                        if (msg.id == event.messageId) {
-                            msg.copy(status = event.status)
-                        } else msg
+                    val targetMsg = _messages.value.find { it.id == event.messageId }
+                    if (targetMsg != null) {
+                        _messages.value = _messages.value.map { msg ->
+                            if (msg.id == event.messageId) {
+                                msg.copy(status = event.status)
+                            } else if (event.status == "read" && msg.senderId == event.senderId && msg.timestamp <= targetMsg.timestamp) {
+                                msg.copy(status = "read")
+                            } else {
+                                msg
+                            }
+                        }
                     }
                 }
             }
