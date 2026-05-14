@@ -1,0 +1,85 @@
+# Staging environment — isolated from production.
+# Uses separate ports and volumes so prod data is never touched.
+#
+# Usage:
+#   cp .env .env.staging          # copy prod env, adjust if needed
+#   docker compose -f docker-compose.staging.yml --env-file .env.staging up -d
+#   # run load tests against http://localhost:8081
+#   docker compose -f docker-compose.staging.yml down -v   # wipe staging data
+
+services:
+  db-staging:
+    image: postgres:17-alpine
+    container_name: messenger-db-staging
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-messenger_staging}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - pgdata_staging:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-messenger_staging}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  cassandra-staging:
+    image: cassandra:5.0
+    container_name: messenger-cassandra-staging
+    restart: unless-stopped
+    environment:
+      CASSANDRA_CLUSTER_NAME: messenger-staging
+      MAX_HEAP_SIZE: 512M
+      HEAP_NEWSIZE: 128M
+    volumes:
+      - cassandra_staging:/var/lib/cassandra
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  redis-staging:
+    image: redis:7-alpine
+    container_name: messenger-redis-staging
+    restart: unless-stopped
+    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_staging:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app-staging:
+    container_name: messenger-backend-staging
+    restart: unless-stopped
+    build:
+      context: .
+    environment:
+      DB_URL: jdbc:postgresql://db-staging:5432/${POSTGRES_DB:-messenger_staging}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      CASSANDRA_HOST: cassandra-staging
+      CASSANDRA_PORT: 9042
+      CASSANDRA_KEYSPACE: ${CASSANDRA_KEYSPACE:-messenger_staging}
+      REDIS_HOST: redis-staging
+      REDIS_PORT: 6379
+      ENABLE_TEST_ROUTES: "true"   # enables /test/seed/* endpoints — staging only!
+    ports:
+      - "127.0.0.1:8081:8080"   # bind to localhost only — not exposed to the internet
+    depends_on:
+      db-staging:
+        condition: service_healthy
+      cassandra-staging:
+        condition: service_healthy
+      redis-staging:
+        condition: service_healthy
+
+volumes:
+  pgdata_staging:
+  cassandra_staging:
+  redis_staging:

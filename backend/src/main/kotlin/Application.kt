@@ -30,6 +30,7 @@ fun Application.module() {
 
     configureRouting(authService)
     configureSockets()
+    configureTestRoutes()
 
     // Graceful shutdown
     monitor.subscribe(ApplicationStopped) {
