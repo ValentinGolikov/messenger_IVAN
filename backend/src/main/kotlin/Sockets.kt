@@ -149,6 +149,10 @@ fun Application.configureSockets() {
                                 }
                             }
                         }
+
+                        // Invalidate chat list cache for all participants
+                        // so next GET /chats/{userId} returns fresh data
+                        RedisFactory.invalidateChatListCacheForUsers(participantIds)
                     }
                 }
             } finally {

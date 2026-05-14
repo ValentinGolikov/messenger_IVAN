@@ -34,6 +34,7 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-core:0.61.0")
     implementation("org.jetbrains.exposed:exposed-jdbc:0.61.0")
     implementation("org.postgresql:postgresql:42.7.10")
+    implementation("com.zaxxer:HikariCP:6.3.0")
     implementation("io.ktor:ktor-client-content-negotiation:3.4.1")
     // Cassandra
     implementation("org.apache.cassandra:java-driver-core:4.19.0")

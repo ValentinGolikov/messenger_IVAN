@@ -1,5 +1,7 @@
 package com.example
 
+import com.zaxxer.hikari.HikariConfig
+import com.zaxxer.hikari.HikariDataSource
 import kotlinx.coroutines.Dispatchers
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.transactions.experimental.newSuspendedTransaction
@@ -18,16 +20,31 @@ object DatabaseFactory {
             "jdbc:postgresql://$host:$port/$dbName"
         }
 
+        // Max pool size: limit concurrent DB connections to prevent port exhaustion
+        // under high load. Requests exceeding the pool will wait (connectionTimeout).
+        val maxPoolSize = env("DB_POOL_SIZE")?.toIntOrNull() ?: 20
+
+        val hikariConfig = HikariConfig().apply {
+            jdbcUrl = dbUrl
+            username = dbUser
+            password = dbPassword
+            driverClassName = "org.postgresql.Driver"
+            maximumPoolSize = maxPoolSize
+            minimumIdle = 5
+            idleTimeout = 60_000          // 60s idle before closing
+            connectionTimeout = 10_000    // 10s wait for a connection from pool
+            maxLifetime = 1_800_000       // 30min max connection lifetime
+            poolName = "MessengerHikariPool"
+            isAutoCommit = false
+        }
+
         try {
-            Database.connect(
-                url = dbUrl,
-                driver = "org.postgresql.Driver",
-                user = dbUser,
-                password = dbPassword,
-            )
+            val dataSource = HikariDataSource(hikariConfig)
+            Database.connect(dataSource)
         } catch (e: Exception) {
             throw IllegalStateException("Failed to configure PostgreSQL connection. DB_URL=$dbUrl, DB_USER=$dbUser", e)
         }
+
         transaction {
             SchemaUtils.createMissingTablesAndColumns(
                 Users,

@@ -11,6 +11,8 @@ object RedisFactory {
     private const val ONLINE_TTL = 60L // seconds
     private const val ONLINE_PREFIX = "user:online:"
     private const val LAST_SEEN_PREFIX = "user:last_seen:"
+    private const val CHAT_LIST_PREFIX = "cache:chats:"
+    private const val CHAT_LIST_TTL = 10L // seconds — short TTL, chat list changes often
 
     fun init() {
         val host = System.getenv("REDIS_HOST") ?: "localhost"
@@ -69,5 +71,29 @@ object RedisFactory {
 
     fun shutdown() {
         if (::client.isInitialized) client.shutdown()
+    }
+
+    // ── Chat list cache ───────────────────────────────────────────────────────
+
+    /** Cache serialized chat list JSON for a user */
+    fun setChatListCache(userId: Int, json: String) {
+        commands.setex("$CHAT_LIST_PREFIX$userId", CHAT_LIST_TTL, json)
+    }
+
+    /** Get cached chat list JSON for a user, null if not cached */
+    fun getChatListCache(userId: Int): String? {
+        return commands.get("$CHAT_LIST_PREFIX$userId")
+    }
+
+    /** Invalidate chat list cache for a user (call when new message arrives) */
+    fun invalidateChatListCache(userId: Int) {
+        commands.del("$CHAT_LIST_PREFIX$userId")
+    }
+
+    /** Invalidate chat list cache for multiple users at once */
+    fun invalidateChatListCacheForUsers(userIds: List<Int>) {
+        if (userIds.isEmpty()) return
+        val keys = userIds.map { "$CHAT_LIST_PREFIX$it" }.toTypedArray()
+        commands.del(*keys)
     }
 }

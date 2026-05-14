@@ -184,9 +184,23 @@ fun Application.configureRouting(authService: AuthService) {
             val userId = call.parameters["userId"]?.toIntOrNull()
                 ?: return@get call.respond(HttpStatusCode.BadRequest)
 
+            // Try cache first
+            val cached = RedisFactory.getChatListCache(userId)
+            if (cached != null) {
+                call.respondText(cached, io.ktor.http.ContentType.Application.Json)
+                return@get
+            }
+
             val chats = DatabaseFactory.dbQuery {
                 getChatListForUser(userId)
             }
+
+            // Cache the result
+            val json = kotlinx.serialization.json.Json.encodeToString(
+                kotlinx.serialization.builtins.ListSerializer(ChatDto.serializer()), chats
+            )
+            RedisFactory.setChatListCache(userId, json)
+
             call.respond(chats)
         }
 
