@@ -13,19 +13,29 @@ object CassandraFactory {
     private lateinit var keyspace: String
 
     fun init() {
-        val host = System.getenv("CASSANDRA_HOST") ?: "localhost"
+        // Support multiple Cassandra hosts (cluster mode)
+        // CASSANDRA_HOST can be comma-separated: "cassandra-1,cassandra-2,cassandra-3"
+        val hostsEnv = System.getenv("CASSANDRA_HOST") ?: "localhost"
         val port = (System.getenv("CASSANDRA_PORT") ?: "9042").toInt()
         keyspace = System.getenv("CASSANDRA_KEYSPACE") ?: "messenger"
+        
+        // Replication factor for cluster (default 3 for production cluster)
+        val replicationFactor = (System.getenv("CASSANDRA_REPLICATION_FACTOR") ?: "3").toInt()
 
-        session = CqlSession.builder()
-            .addContactPoint(InetSocketAddress(host, port))
+        val builder = CqlSession.builder()
             .withLocalDatacenter("datacenter1")
-            .build()
 
-        // Create keyspace
+        // Add all contact points for cluster
+        hostsEnv.split(",").map { it.trim() }.forEach { host ->
+            builder.addContactPoint(InetSocketAddress(host, port))
+        }
+
+        session = builder.build()
+
+        // Create keyspace with appropriate replication factor
         session.execute("""
             CREATE KEYSPACE IF NOT EXISTS $keyspace
-            WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}
+            WITH replication = {'class': 'SimpleStrategy', 'replication_factor': $replicationFactor}
         """.trimIndent())
 
         session.execute("USE $keyspace")

@@ -7,78 +7,97 @@
 ```bash
 # Windows (winget)
 winget install k6 --source winget
-
-# macOS
-brew install k6
-
-# Linux (Debian/Ubuntu)
-sudo gpg -k
-sudo gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg \
-  --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D6AC1D69
-echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" \
-  | sudo tee /etc/apt/sources.list.d/k6.list
-sudo apt-get update && sudo apt-get install k6
-```
-
-## Запуск staging-окружения
-
-```bash
-cd backend
-
-# Первый запуск — сборка образа занимает несколько минут
-docker compose -f docker-compose.staging.yml up -d --build
-
-# Дождаться готовности (смотреть логи)
-docker compose -f docker-compose.staging.yml logs -f app-staging
 ```
 
 Сервис будет доступен на `http://localhost:8081`.
 
+---
+
+## Запуск с кластером Cassandra 
+
+### Шаг 1 — Настроить WSL
+
+В файле `C:\Users\<user>\.wslconfig`:
+
+```ini
+[wsl2]
+memory=16GB
+processors=6
+swap=6GB
+```
+
+P.S. Можно выставить побольше, например 24GB, для тестов должно хватить и 16GB
+
+Применить:
+
+```powershell
+wsl --shutdown
+# подождать 10 секунд
+wsl
+```
+
+### Шаг 2 — Запустить кластер Cassandra
+
+```bash
+cd messenger_IVAN/
+
+# Запустить 3 ноды (ноды стартуют последовательно, ~3-5 минут)
+docker compose -f backend/docker-compose.cassandra-cluster.yml up -d
+```
+
+### Шаг 3 — Запустить приложение
+
+```bash
+docker compose -f backend/docker-compose.staging-cluster.yml --env-file .env.staging up -d --build
+docker compose -f backend/docker-compose.staging.yml up -d
+```
+
+### Шаг 4 (дополнительно) - Запустить Grafana
+
+```bash
+docker compose -f load-test/docker-compose.grafana.yml up -d
+```
+
+Grafana будет запущена на [localhost](http://localhost:3000). 
+Там нужно создать Data Source в разделе Connections:
+1. Add new Data Source
+2. Выбираем InfluxDB
+3. URL: http://influxdb:8086
+4. Database: k6
+5. Затем Save & Test
+
+---
+
+После создания Data Source импортируем Dashboard
+В поле для JSON файла вставить код из файла [grafana.json](./grafana.json) и импортировать DashBoard. На DashBoard указать сверху Last 15 minutes и Refresh каждые 5 секунд
+
+### Остановка кластера
+
+```bash
+# Остановить приложение
+docker compose -f backend/docker-compose.staging-cluster.yml down
+docker compose -f backend/docker-compose.staging.yml down
+
+# Остановить кластер Cassandra
+docker compose -f backend/docker-compose.cassandra-cluster.yml down
+
+# Остановить Grafana
+docker compose -f load-tests/docker-compose.grafana.yml down
+```
+
+---
+
 ## Запуск тестов
+
+Производится с хоста
 
 ```bash
 cd load-tests
 
-# Smoke test — быстрая проверка что всё работает (1 пользователь, 30 сек)
-k6 run smoke.js
-
-# REST API — нагрузка на HTTP эндпоинты
-k6 run --env BASE_URL=http://localhost:8081 rest-api.js
-
-# WebSocket — нагрузка на WS соединения и обмен сообщениями
-k6 run --env BASE_URL=http://localhost:8081 websocket.js
-
-# Полный сценарий (REST + WS вместе)
-k6 run --env BASE_URL=http://localhost:8081 full-scenario.js
-
-# Стресс-тест (постепенное увеличение нагрузки)
-k6 run --env BASE_URL=http://localhost:8081 stress.js
+# Стресс-тест (до 300 VU)
+.\run-test.ps1 -TestName stress
 ```
 
-## Параметры
-
-| Переменная    | По умолчанию            | Описание                        |
-|---------------|-------------------------|---------------------------------|
-| `BASE_URL`    | `http://localhost:8081` | Адрес тестируемого сервиса      |
-| `USER_COUNT`  | `50`                    | Количество виртуальных юзеров   |
-| `DURATION`    | `2m`                    | Длительность теста              |
-
-Пример с параметрами:
-```bash
-k6 run --env BASE_URL=http://localhost:8081 --env USER_COUNT=100 --env DURATION=5m rest-api.js
-```
-
-## Очистка staging
-
-```bash
-# Остановить и удалить все данные staging
-docker compose -f docker-compose.staging.yml down -v
-```
-
-## Важно
-
-- **Никогда не запускай тесты против прода** (`http://localhost:8080` или реального сервера)
-  без явного намерения — тесты создают сотни пользователей и тысячи сообщений.
-- Аутентификация через Yandex OAuth не мокируется — тесты используют прямые вызовы
-  к `/login` с заранее созданными тестовыми пользователями через seed-скрипт.
-- Перед тестами запусти `seed.js` для создания тестовых данных.
+Тест автоматически:
+- Отправляет метрики в Grafana (InfluxDB)
+- Сохраняет результат в файл `<test>_result_HH_mm_ss.txt`

@@ -1,0 +1,71 @@
+# Staging environment with Cassandra 3-node cluster
+# Requires: 16GB RAM minimum
+#
+# Usage:
+#   1. Start Cassandra cluster first:
+#      docker compose -f docker-compose.cassandra-cluster.yml up -d
+#      # Wait ~2 minutes for cluster to be ready
+#
+#   2. Start staging environment:
+#      cp .env.example .env.staging
+#      docker compose -f docker-compose.staging-cluster.yml --env-file .env.staging up -d --build
+
+services:
+  db-staging:
+    image: postgres:17-alpine
+    container_name: messenger-db-staging
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-messenger_staging}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - pgdata_staging:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-messenger_staging}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis-staging:
+    image: redis:7-alpine
+    container_name: messenger-redis-staging
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_staging:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app-staging:
+    container_name: messenger-backend-staging
+    restart: unless-stopped
+    build:
+      context: .
+    environment:
+      DB_URL: jdbc:postgresql://db-staging:5432/${POSTGRES_DB:-messenger_staging}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      # Connect to Cassandra cluster (all 3 nodes as contact points)
+      CASSANDRA_HOST: cassandra-1,cassandra-2,cassandra-3
+      CASSANDRA_PORT: 9042
+      CASSANDRA_KEYSPACE: ${CASSANDRA_KEYSPACE:-messenger_staging}
+      CASSANDRA_REPLICATION_FACTOR: 3
+      REDIS_HOST: redis-staging
+      REDIS_PORT: 6379
+      ENABLE_TEST_ROUTES: "true"
+    ports:
+      - "127.0.0.1:8081:8080"
+    depends_on:
+      db-staging:
+        condition: service_healthy
+      redis-staging:
+        condition: service_healthy
+    # Cassandra cluster is external - app will retry connection
+
+volumes:
+  pgdata_staging:
+  redis_staging:

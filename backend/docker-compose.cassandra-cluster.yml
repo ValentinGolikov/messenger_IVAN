@@ -1,0 +1,79 @@
+# Cassandra 3-node cluster for load testing
+# Requires: 16GB RAM minimum
+#
+# Usage:
+#   docker compose -f docker-compose.cassandra-cluster.yml up -d
+#   # Wait ~2 minutes for cluster to form
+#   docker compose -f docker-compose.cassandra-cluster.yml logs -f cassandra-1
+
+services:
+  cassandra-1:
+    image: cassandra:5.0
+    container_name: messenger-cassandra-1
+    hostname: cassandra-1
+    environment:
+      CASSANDRA_CLUSTER_NAME: messenger-cluster
+      CASSANDRA_DC: datacenter1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      CASSANDRA_SEEDS: cassandra-1,cassandra-2,cassandra-3
+      MAX_HEAP_SIZE: 2560M
+      HEAP_NEWSIZE: 640M
+    volumes:
+      - cassandra1_data:/var/lib/cassandra
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES' cassandra-1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  cassandra-2:
+    image: cassandra:5.0
+    container_name: messenger-cassandra-2
+    hostname: cassandra-2
+    environment:
+      CASSANDRA_CLUSTER_NAME: messenger-cluster
+      CASSANDRA_DC: datacenter1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      CASSANDRA_SEEDS: cassandra-1,cassandra-2,cassandra-3
+      MAX_HEAP_SIZE: 2560M
+      HEAP_NEWSIZE: 640M
+    volumes:
+      - cassandra2_data:/var/lib/cassandra
+    depends_on:
+      cassandra-1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES' cassandra-2"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  cassandra-3:
+    image: cassandra:5.0
+    container_name: messenger-cassandra-3
+    hostname: cassandra-3
+    environment:
+      CASSANDRA_CLUSTER_NAME: messenger-cluster
+      CASSANDRA_DC: datacenter1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      CASSANDRA_SEEDS: cassandra-1,cassandra-2,cassandra-3
+      MAX_HEAP_SIZE: 2560M
+      HEAP_NEWSIZE: 640M
+    volumes:
+      - cassandra3_data:/var/lib/cassandra
+    depends_on:
+      cassandra-2:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES' cassandra-3"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+volumes:
+  cassandra1_data:
+  cassandra2_data:
+  cassandra3_data:

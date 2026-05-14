@@ -95,12 +95,20 @@ fun Application.configureRouting(authService: AuthService) {
                 myChats.forEach { chat ->
                     if (messageHits.size >= 20) return@forEach
                     val msgs = CassandraFactory.getMessages(chat.id, 200)
-                    msgs.filter { !it.isDeleted && it.text.lowercase().contains(q) }
-                        .take(5)
-                        .forEach { msg ->
-                            val senderName = if (msg.senderId == 0) "Система" else {
-                                Users.selectAll().where { Users.id eq msg.senderId }.singleOrNull()?.get(Users.displayName) ?: "Unknown"
-                            }
+                    val matching = msgs.filter { !it.isDeleted && it.text.lowercase().contains(q) }.take(5)
+                    if (matching.isEmpty()) return@forEach
+
+                    // Batch-load sender names for matching messages
+                    val senderIds = matching.map { it.senderId }.filter { it != 0 }.toSet()
+                    val names = mutableMapOf<Int, String>()
+                    if (senderIds.isNotEmpty()) {
+                        Users.selectAll().where { Users.id inList senderIds }
+                            .forEach { row -> names[row[Users.id]] = row[Users.displayName] }
+                    }
+
+                    matching.forEach { msg ->
+                            val senderName = if (msg.senderId == 0) "Система"
+                                             else names[msg.senderId] ?: "Unknown"
                             messageHits.add(
                                 MessageDto(
                                     id = msg.id.toString(),
@@ -269,14 +277,20 @@ fun Application.configureRouting(authService: AuthService) {
                 .filter { !it.isDeleted }
                 .filter { it.id.toString() !in deletedIds }
                 .filter { clearedAt == null || it.timestamp > clearedAt }
-                .map { msg ->
-                    val senderName = if (msg.senderId == 0) "Система" else senderNames.getOrPut(msg.senderId) {
-                        DatabaseFactory.dbQuery {
-                            Users.selectAll()
-                                .where { Users.id eq msg.senderId }
-                                .singleOrNull()?.get(Users.displayName) ?: "Unknown"
-                        }
-                    }
+
+            // Batch-load all sender names in ONE query instead of N+1
+            val senderIds = messages.map { it.senderId }.filter { it != 0 }.toSet()
+            if (senderIds.isNotEmpty()) {
+                DatabaseFactory.dbQuery {
+                    Users.selectAll()
+                        .where { Users.id inList senderIds }
+                        .forEach { row -> senderNames[row[Users.id]] = row[Users.displayName] }
+                }
+            }
+
+            val messageDtos = messages.map { msg ->
+                    val senderName = if (msg.senderId == 0) "Система"
+                                     else senderNames[msg.senderId] ?: "Unknown"
                     MessageDto(
                         id = msg.id.toString(),
                         chatId = msg.chatId,
@@ -288,7 +302,7 @@ fun Application.configureRouting(authService: AuthService) {
                         messageType = msg.messageType
                     )
                 }
-            call.respond(messages)
+            call.respond(messageDtos)
         }
 
         /** Mark messages as read */
