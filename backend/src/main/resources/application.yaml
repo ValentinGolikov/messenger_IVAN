@@ -4,3 +4,15 @@ ktor:
       - com.example.ApplicationKt.module
   deployment:
     port: 8080
+    # Increase thread pool for high concurrency
+    # 16 workers for high load (was default 2 * CPU)
+    worker_count: 16
+    # Increase request queue size
+    request_queue_size: 20000
+    # Increase idle timeout
+    idle_timeout: 30000
+  server:
+    # Netty configuration for high concurrency
+    max_content_length: 10485760
+    max_header_size: 8192
+    max_chunk_size: 8192

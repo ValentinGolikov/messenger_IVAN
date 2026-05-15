@@ -16,8 +16,9 @@ services:
       CASSANDRA_DC: datacenter1
       CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
       CASSANDRA_SEEDS: cassandra-1,cassandra-2,cassandra-3
-      MAX_HEAP_SIZE: 2560M
-      HEAP_NEWSIZE: 640M
+      # Heap: 3GB (leave room for OS page cache)
+      MAX_HEAP_SIZE: 3072M
+      HEAP_NEWSIZE: 768M
     volumes:
       - cassandra1_data:/var/lib/cassandra
     healthcheck:
@@ -36,8 +37,9 @@ services:
       CASSANDRA_DC: datacenter1
       CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
       CASSANDRA_SEEDS: cassandra-1,cassandra-2,cassandra-3
-      MAX_HEAP_SIZE: 2560M
-      HEAP_NEWSIZE: 640M
+      # Heap: 3GB (leave room for OS page cache)
+      MAX_HEAP_SIZE: 3072M
+      HEAP_NEWSIZE: 768M
     volumes:
       - cassandra2_data:/var/lib/cassandra
     depends_on:
@@ -59,8 +61,9 @@ services:
       CASSANDRA_DC: datacenter1
       CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
       CASSANDRA_SEEDS: cassandra-1,cassandra-2,cassandra-3
-      MAX_HEAP_SIZE: 2560M
-      HEAP_NEWSIZE: 640M
+      # Heap: 3GB (leave room for OS page cache)
+      MAX_HEAP_SIZE: 3072M
+      HEAP_NEWSIZE: 768M
     volumes:
       - cassandra3_data:/var/lib/cassandra
     depends_on:
