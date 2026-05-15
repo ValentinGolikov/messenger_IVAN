@@ -20,9 +20,10 @@ object DatabaseFactory {
             "jdbc:postgresql://$host:$port/$dbName"
         }
 
-        // Max pool size: limit concurrent DB connections to prevent port exhaustion
-        // under high load. Requests exceeding the pool will wait (connectionTimeout).
-        val maxPoolSize = env("DB_POOL_SIZE")?.toIntOrNull() ?: 20
+        // Max pool size: increased for high load (10K+ concurrent users)
+        // Rule of thumb: (core_count * 2) + effective_spindle_count
+        // For load testing with 10K users, we need more connections
+        val maxPoolSize = env("DB_POOL_SIZE")?.toIntOrNull() ?: 100
 
         val hikariConfig = HikariConfig().apply {
             jdbcUrl = dbUrl

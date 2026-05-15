@@ -1155,50 +1155,88 @@ private fun findOrCreateDm(userA: Int, userB: Int): Int {
 }
 
 private fun getChatListForUser(userId: Int): List<ChatDto> {
+    // Step 1: Get all participations for user (1 query)
     val myParticipations = ChatParticipants.selectAll()
         .where { ChatParticipants.userId eq userId }
         .map { it[ChatParticipants.chatId] to it[ChatParticipants.clearedAt] }
 
     if (myParticipations.isEmpty()) return emptyList()
 
+    val chatIds = myParticipations.map { it.first }
+
+    // Step 2: Batch load all chats (1 query instead of N)
+    val chatRows = Chats.selectAll()
+        .where { Chats.id inList chatIds }
+        .associateBy { it[Chats.id] }
+
+    // Step 3: Batch load all DM participants (1 query instead of N)
+    val dmChatIds = chatRows.filter { it.value[Chats.type] == "dm" }.keys
+    val dmParticipants = if (dmChatIds.isNotEmpty()) {
+        ChatParticipants.selectAll()
+            .where { (ChatParticipants.chatId inList dmChatIds) and (ChatParticipants.userId neq userId) }
+            .associate { it[ChatParticipants.chatId] to it[ChatParticipants.userId] }
+    } else emptyMap()
+
+    // Step 4: Batch load all user names for DMs (1 query instead of N)
+    val dmUserIds = dmParticipants.values.distinct()
+    val userNames = if (dmUserIds.isNotEmpty()) {
+        Users.selectAll()
+            .where { Users.id inList dmUserIds }
+            .associate { it[Users.id] to it[Users.displayName] }
+    } else emptyMap()
+
+    // Step 5: Batch load last messages from Cassandra and their sender names
+    val lastMessages = mutableMapOf<Int, MessageDto>()
+    val senderIds = mutableSetOf<Int>()
+
+    // Get last messages from Cassandra (batch)
+    chatIds.forEach { chatId ->
+        CassandraFactory.getLastMessage(chatId)?.let { msg ->
+            val clearedAt = myParticipations.find { it.first == chatId }?.second
+            if (clearedAt != null && msg.timestamp <= clearedAt) return@let
+            if (msg.isDeleted) return@let
+            lastMessages[chatId] = MessageDto(
+                id = msg.id.toString(),
+                chatId = msg.chatId,
+                senderId = msg.senderId,
+                senderName = "", // Will be filled below
+                text = msg.text,
+                timestamp = msg.timestamp,
+                status = msg.status,
+                messageType = msg.messageType
+            )
+            if (msg.senderId != 0) senderIds.add(msg.senderId)
+        }
+    }
+
+    // Batch load sender names (1 query instead of N)
+    val senderNames = if (senderIds.isNotEmpty()) {
+        Users.selectAll()
+            .where { Users.id inList senderIds }
+            .associate { it[Users.id] to it[Users.displayName] }
+    } else emptyMap()
+
+    // Fill sender names
+    lastMessages.forEach { (_, msg) ->
+        if (msg.senderId != 0) {
+            lastMessages[msg.chatId] = msg.copy(senderName = senderNames[msg.senderId] ?: "Unknown")
+        }
+    }
+
+    // Step 6: Build result
     return myParticipations.mapNotNull { (cId, clearedAt) ->
-        val chatRow = Chats.selectAll().where { Chats.id eq cId }.singleOrNull() ?: return@mapNotNull null
+        val chatRow = chatRows[cId] ?: return@mapNotNull null
         val chatType = chatRow[Chats.type]
 
         var otherUserId: Int? = null
         var otherUserName: String? = null
 
         if (chatType == "dm") {
-            val other = ChatParticipants.selectAll()
-                .where { (ChatParticipants.chatId eq cId) and (ChatParticipants.userId neq userId) }
-                .firstOrNull()
-            if (other != null) {
-                otherUserId = other[ChatParticipants.userId]
-                otherUserName = Users.selectAll()
-                    .where { Users.id eq otherUserId!! }
-                    .singleOrNull()?.get(Users.displayName)
-            }
+            otherUserId = dmParticipants[cId]
+            otherUserName = otherUserId?.let { userNames[it] }
         }
 
-        // Last message from Cassandra
-        val lastMsg = CassandraFactory.getLastMessage(cId)?.let { msg ->
-            // If DM was cleared, skip messages before clearedAt
-            if (clearedAt != null && msg.timestamp <= clearedAt) return@let null
-            if (msg.isDeleted) return@let null
-            val senderName = if (msg.senderId == 0) "Система" else Users.selectAll()
-                .where { Users.id eq msg.senderId }
-                .singleOrNull()?.get(Users.displayName) ?: "Unknown"
-            MessageDto(
-                id = msg.id.toString(),
-                chatId = msg.chatId,
-                senderId = msg.senderId,
-                senderName = senderName,
-                text = msg.text,
-                timestamp = msg.timestamp,
-                status = msg.status,
-                messageType = msg.messageType
-            )
-        }
+        val lastMsg = lastMessages[cId]
 
         // If DM was cleared and no messages after clearedAt, hide the chat
         if (clearedAt != null && lastMsg == null && chatType == "dm") return@mapNotNull null

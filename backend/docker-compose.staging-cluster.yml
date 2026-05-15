@@ -49,6 +49,7 @@ services:
       DB_URL: jdbc:postgresql://db-staging:5432/${POSTGRES_DB:-messenger_staging}
       DB_USER: ${POSTGRES_USER:-postgres}
       DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DB_POOL_SIZE: 100
       # Connect to Cassandra cluster (all 3 nodes as contact points)
       CASSANDRA_HOST: cassandra-1,cassandra-2,cassandra-3
       CASSANDRA_PORT: 9042

@@ -21,8 +21,20 @@ services:
       INFLUXDB_DB: k6
       INFLUXDB_ADMIN_USER: admin
       INFLUXDB_ADMIN_PASSWORD: admin
+      # Оптимизация для высокой нагрузки
+      INFLUXDB_HTTP_MAX_BODY_SIZE: 0
+      INFLUXDB_HTTP_MAX_CONNECTION_LIMIT: 0
+      INFLUXDB_DATA_MAX_VALUES_PER_TAG: 0
+      INFLUXDB_DATA_MAX_SERIES_PER_DATABASE: 0
     volumes:
       - influxdb_data:/var/lib/influxdb
+    # Увеличиваем ресурсы для InfluxDB
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
 
   grafana:
     image: grafana/grafana:latest
